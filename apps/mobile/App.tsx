@@ -29,9 +29,11 @@ const tierOrder = ["S", "A", "B", "C", "Unrated"] as const;
 export default function App() {
   const [keyword, setKeyword] = useState("");
   const [isLoading, setLoading] = useState(false);
+  const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
   const [results, setResults] = useState<Anime[]>([]);
 
   const list = useAnimeStore((state) => state.list);
+  const history = useAnimeStore((state) => state.history);
   const addAnime = useAnimeStore((state) => state.addAnime);
   const reorder = useAnimeStore((state) => state.reorder);
   const updateTier = useAnimeStore((state) => state.updateTier);
@@ -99,6 +101,14 @@ export default function App() {
   }, [list]);
 
   const grid = compactGrid(toNineGrid(list));
+
+  const sortedHistory = useMemo(() => {
+    const next = [...history].sort(
+      (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
+    );
+
+    return historyOrder === "asc" ? next : next.reverse();
+  }, [history, historyOrder]);
 
   const renderRankItem = ({
     item,
@@ -221,6 +231,69 @@ export default function App() {
                 )}
               </View>
             ))}
+          </View>
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.h2}>历史记录</Text>
+          <View style={styles.tierRow}>
+            <Text style={styles.score}>按时间排序</Text>
+            <View style={styles.tierRow}>
+              <Pressable
+                onPress={() => setHistoryOrder("desc")}
+                style={[
+                  styles.tier,
+                  historyOrder === "desc" && styles.tierActive,
+                ]}
+              >
+                <Text
+                  style={
+                    historyOrder === "desc"
+                      ? styles.tierTextActive
+                      : styles.tierText
+                  }
+                >
+                  最新
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setHistoryOrder("asc")}
+                style={[
+                  styles.tier,
+                  historyOrder === "asc" && styles.tierActive,
+                ]}
+              >
+                <Text
+                  style={
+                    historyOrder === "asc"
+                      ? styles.tierTextActive
+                      : styles.tierText
+                  }
+                >
+                  最早
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={{ gap: 8 }}>
+            {sortedHistory.map((record, index) => (
+              <View
+                style={styles.result}
+                key={`${record.animeId}-${record.addedAt}-${index}`}
+              >
+                <Image source={{ uri: record.cover }} style={styles.cover} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.title}>{record.name}</Text>
+                  <Text style={styles.score}>
+                    {new Date(record.addedAt).toLocaleString("zh-CN")}
+                  </Text>
+                </View>
+              </View>
+            ))}
+            {sortedHistory.length === 0 ? (
+              <Text style={styles.score}>还没有添加记录</Text>
+            ) : null}
           </View>
         </View>
       </ScrollView>

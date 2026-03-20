@@ -5,17 +5,25 @@ import type { Anime, AnimeItem, Tier } from "./types";
 
 type AnimeStore = {
   list: AnimeItem[];
+  history: Array<{
+    animeId: number;
+    name: string;
+    cover: string;
+    addedAt: string;
+  }>;
   selectedTag: string;
   addAnime: (anime: Anime) => void;
   removeAnime: (id: number) => void;
   reorder: (next: AnimeItem[]) => void;
   updateTier: (id: number, tier: Tier) => void;
+  remapTier: (fromTier: Tier, toTier: Tier) => void;
   setTags: (id: number, tags: string[]) => void;
   setSelectedTag: (tag: string) => void;
 };
 
 export const useAnimeStore = create<AnimeStore>((set) => ({
   list: [],
+  history: [],
   selectedTag: "all",
   addAnime: (anime) =>
     set((state) => {
@@ -34,6 +42,15 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
 
       return {
         list: [record, ...state.list],
+        history: [
+          {
+            animeId: record.id,
+            name: record.name,
+            cover: record.cover,
+            addedAt: record.addedAt,
+          },
+          ...state.history,
+        ],
       };
     }),
   removeAnime: (id) =>
@@ -51,6 +68,17 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
           ? {
               ...item,
               tier,
+            }
+          : item,
+      ),
+    })),
+  remapTier: (fromTier, toTier) =>
+    set((state) => ({
+      list: state.list.map((item) =>
+        item.tier === fromTier
+          ? {
+              ...item,
+              tier: toTier,
             }
           : item,
       ),

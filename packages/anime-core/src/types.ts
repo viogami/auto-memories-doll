@@ -1,6 +1,6 @@
 export const TIER_ORDER = ["S", "A", "B", "C", "Unrated"] as const;
 
-export type Tier = (typeof TIER_ORDER)[number];
+export type Tier = string;
 
 export type Anime = {
   id: number;

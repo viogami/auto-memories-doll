@@ -1,5 +1,10 @@
 import { TIER_ORDER, type AnimeItem, type Tier } from "./types";
 
+function getTierRank(tier: Tier): number {
+  const index = TIER_ORDER.indexOf(tier as (typeof TIER_ORDER)[number]);
+  return index === -1 ? TIER_ORDER.length + 1 : index;
+}
+
 export function computeTier(score: number): Tier {
   if (score >= 8.8) {
     return "S";
@@ -22,8 +27,8 @@ export function computeTier(score: number): Tier {
 
 export function sortByTierAndScore(items: AnimeItem[]): AnimeItem[] {
   return [...items].sort((a, b) => {
-    const tierA = TIER_ORDER.indexOf(a.tier);
-    const tierB = TIER_ORDER.indexOf(b.tier);
+    const tierA = getTierRank(a.tier);
+    const tierB = getTierRank(b.tier);
 
     if (tierA !== tierB) {
       return tierA - tierB;

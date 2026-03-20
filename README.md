@@ -8,9 +8,10 @@
 - 九宫格生成与排序
 - Web 端九宫格导出 PNG
 
-| 效果图1                                | 效果图2                                |
-| -------------------------------------- | -------------------------------------- |
-| ![alt text](apps/docs/public/ai-2.png) | ![alt text](apps/docs/public/ai-3.png) |
+| 效果图                                  | 效果图                                  |
+| --------------------------------------- | --------------------------------------- |
+| ![alt text](apps/docs/public/app-0.png) | ![alt text](apps/docs/public/app-1.png) |
+| ![alt text](apps/docs/public/app-2.png) | ![alt text](apps/docs/public/app-3.png) |
 
 ## 前端完全由ai生成
 
@@ -69,6 +70,7 @@ npm run check-types --workspace=@repo/anime-core
 ## 关键文件
 
 - `apps/web/app/sections/anime-dashboard.tsx`
+- `apps/web/app/config/dashboard-config.ts`
 - `apps/web/app/api/anime/route.ts`
 - `apps/mobile/App.tsx`
 - `packages/anime-core/src/store.ts`
