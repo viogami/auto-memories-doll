@@ -36,8 +36,10 @@ import {
   type TierLevelConfig,
 } from "../config/dashboard-config";
 
-const TOKEN_KEY = "am_cloud_token";
-const USERNAME_KEY = "am_cloud_username";
+const TOKEN_KEY =
+  process.env.NEXT_PUBLIC_CLOUD_TOKEN_KEY?.trim() || "am_cloud_token";
+const USERNAME_KEY =
+  process.env.NEXT_PUBLIC_CLOUD_USER_KEY?.trim() || "am_cloud_username";
 const REQUEST_TIMEOUT_MS = 7000;
 const HEALTH_CHECK_INTERVAL_MS = 12000;
 
@@ -339,7 +341,7 @@ export function AnimeDashboard() {
   const remapTier = useAnimeStore((state) => state.remapTier);
 
   const apiBase =
-    process.env.NEXT_PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8088";
+    process.env.PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8080/CH";
 
   const { data, isLoading } = useSWR(
     keyword ? `/api/anime?q=${encodeURIComponent(keyword)}` : null,
