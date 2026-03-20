@@ -1,0 +1,30 @@
+{
+  "name": "mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo/AppEntry",
+  "scripts": {
+    "dev": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "lint": "eslint --max-warnings 0",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@repo/anime-core": "*",
+    "expo": "^53.0.20",
+    "expo-status-bar": "~2.2.3",
+    "react": "^19.0.0",
+    "react-native": "^0.79.5",
+    "react-native-safe-area-context": "^5.6.0",
+    "react-native-draggable-flatlist": "^4.0.3"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "*",
+    "@repo/typescript-config": "*",
+    "@types/react": "19.2.2",
+    "eslint": "^9.39.1",
+    "typescript": "5.9.2"
+  }
+}
