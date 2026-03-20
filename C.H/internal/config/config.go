@@ -17,7 +17,7 @@ type Config struct {
 func Load() (Config, error) {
 	cfg := Config{
 		Port:           getOrDefault("PORT", "8088"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		DatabaseURL:    os.Getenv("AMD_DATABASE_URL"),
 		PasswordPepper: getOrDefault("PASSWORD_PEPPER", "dev-pepper"),
 		AllowedOrigin:  getOrDefault("ALLOWED_ORIGIN", "http://localhost:3000"),
 	}
@@ -30,7 +30,7 @@ func Load() (Config, error) {
 	cfg.SessionTTLHours = ttl
 
 	if cfg.DatabaseURL == "" {
-		return Config{}, fmt.Errorf("DATABASE_URL is required")
+		return Config{}, fmt.Errorf("AMD_DATABASE_URL is required")
 	}
 
 	return cfg, nil

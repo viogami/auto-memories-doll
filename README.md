@@ -1,4 +1,4 @@
-# auto-memories-doll 👉[立即体验](https://viogami.github.io/blog)
+# auto-memories-doll 👉[立即体验](https://auto-memories-doll-web.vercel.app/)
 
 跨端动漫管理应用（Web + Mobile），前端为静态页面，可以单独启动，数据保存在本地。
 
@@ -16,10 +16,10 @@
 - rank等级文本，颜色，完全自定义配置！
 - 支持上传云端，永远保存你的记录！
 
-| 效果图                                  | 效果图                                  |
-| --------------------------------------- | --------------------------------------- |
-| ![alt text](apps/docs/public/app-0.png) | ![alt text](apps/docs/public/app-1.png) |
-| ![alt text](apps/docs/public/app-2.png) | ![alt text](apps/docs/public/app-3.png) |
+![alt text](apps/docs/public/app-0.png)
+![alt text](apps/docs/public/app-1.png)
+![alt text](apps/docs/public/app-2.png)
+![alt text](apps/docs/public/app-3.png)
 
 ## 前端完全由ai生成
 
@@ -86,3 +86,5 @@ npm run check-types --workspace=@repo/anime-core
 - `packages/anime-core/src/store.ts`
 - `packages/anime-core/src/rank.ts`
 - `packages/anime-core/src/grid.ts`
+
+## 👉[更详细的本人博客](https://viogami.github.io/blog/project/auto-memories-doll/index.html)
