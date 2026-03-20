@@ -12,6 +12,15 @@ type AnimeStore = {
     addedAt: string;
   }>;
   selectedTag: string;
+  setList: (list: AnimeItem[]) => void;
+  setHistory: (
+    history: Array<{
+      animeId: number;
+      name: string;
+      cover: string;
+      addedAt: string;
+    }>,
+  ) => void;
   addAnime: (anime: Anime) => void;
   removeAnime: (id: number) => void;
   reorder: (next: AnimeItem[]) => void;
@@ -25,6 +34,14 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
   list: [],
   history: [],
   selectedTag: "all",
+  setList: (list) =>
+    set(() => ({
+      list,
+    })),
+  setHistory: (history) =>
+    set(() => ({
+      history,
+    })),
   addAnime: (anime) =>
     set((state) => {
       const existed = state.list.some((item) => item.id === anime.id);

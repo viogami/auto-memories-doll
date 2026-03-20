@@ -26,7 +26,7 @@ import {
 } from "@repo/anime-core";
 import { toPng } from "html-to-image";
 import Image from "next/image";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 
 import {
@@ -35,6 +35,11 @@ import {
   type PanelKey,
   type TierLevelConfig,
 } from "../config/dashboard-config";
+
+const TOKEN_KEY = "am_cloud_token";
+const USERNAME_KEY = "am_cloud_username";
+const REQUEST_TIMEOUT_MS = 7000;
+const HEALTH_CHECK_INTERVAL_MS = 12000;
 
 const fetcher = async (url: string): Promise<Anime[]> => {
   const response = await fetch(url);
@@ -51,6 +56,84 @@ const createInitialConfig = (): DashboardConfig => ({
   panelTitles: { ...DASHBOARD_CONFIG.panelTitles },
   tierLevels: DASHBOARD_CONFIG.tierLevels.map((item) => ({ ...item })),
 });
+
+function normalizeConfig(
+  input: unknown,
+  fallback: DashboardConfig,
+): DashboardConfig {
+  if (!input || typeof input !== "object") {
+    return fallback;
+  }
+
+  const source = input as Partial<DashboardConfig>;
+  const levels = Array.isArray(source.tierLevels)
+    ? source.tierLevels
+        .map((item) => {
+          if (!item || typeof item !== "object") {
+            return null;
+          }
+
+          const row = item as Partial<TierLevelConfig>;
+          const tier = typeof row.tier === "string" ? row.tier.trim() : "";
+          if (!tier) {
+            return null;
+          }
+
+          return {
+            tier,
+            label:
+              typeof row.label === "string" && row.label.trim()
+                ? row.label
+                : tier,
+            color:
+              typeof row.color === "string" && row.color.trim()
+                ? row.color
+                : "#9cc5ff",
+          };
+        })
+        .filter((item): item is TierLevelConfig => item !== null)
+    : fallback.tierLevels;
+
+  return {
+    ...fallback,
+    ...source,
+    panelTitles: {
+      ...fallback.panelTitles,
+      ...(source.panelTitles || {}),
+    },
+    defaultPanels:
+      Array.isArray(source.defaultPanels) && source.defaultPanels.length > 0
+        ? source.defaultPanels
+        : fallback.defaultPanels,
+    tierLevels: levels.length > 0 ? levels : fallback.tierLevels,
+  };
+}
+
+function parseCloudPayload(payload: unknown): {
+  list?: AnimeItem[];
+  uiConfig?: DashboardConfig;
+} {
+  let raw = payload;
+
+  if (typeof payload === "string") {
+    try {
+      raw = JSON.parse(payload);
+    } catch {
+      return {};
+    }
+  }
+
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+
+  const obj = raw as {
+    list?: AnimeItem[];
+    uiConfig?: DashboardConfig;
+  };
+
+  return obj;
+}
 
 function SortableRankCard({
   anime,
@@ -212,34 +295,83 @@ export function AnimeDashboard() {
     useSensor(PointerSensor),
     useSensor(KeyboardSensor),
   );
+
   const [keyword, setKeyword] = useState("");
   const [searchText, setSearchText] = useState("");
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
-  const [newTierKey, setNewTierKey] = useState("");
-  const [newTierLabel, setNewTierLabel] = useState("");
-  const [newTierColor, setNewTierColor] = useState("#9cc5ff");
-  const [isExporting, setIsExporting] = useState(false);
-  const [isExportingTier, setIsExportingTier] = useState(false);
+
   const [uiConfig, setUiConfig] =
     useState<DashboardConfig>(createInitialConfig);
   const [activePanels, setActivePanels] = useState<PanelKey[]>(
     DASHBOARD_CONFIG.defaultPanels,
   );
+
+  const [newTierKey, setNewTierKey] = useState("");
+  const [newTierLabel, setNewTierLabel] = useState("");
+  const [newTierColor, setNewTierColor] = useState("#9cc5ff");
+
+  const [token, setToken] = useState("");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [currentUser, setCurrentUser] = useState("");
+  const [cloudMessage, setCloudMessage] = useState("");
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [syncingCloud, setSyncingCloud] = useState(false);
+  const [syncControlEnabled, setSyncControlEnabled] = useState(false);
+  const [backendStatus, setBackendStatus] = useState<
+    "checking" | "online" | "offline"
+  >("checking");
+
+  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingTier, setIsExportingTier] = useState(false);
+
   const gridRef = useRef<HTMLDivElement | null>(null);
   const tierRef = useRef<HTMLDivElement | null>(null);
 
   const list = useAnimeStore((state) => state.list);
   const history = useAnimeStore((state) => state.history);
+  const setList = useAnimeStore((state) => state.setList);
+  const setHistory = useAnimeStore((state) => state.setHistory);
   const addAnime = useAnimeStore((state) => state.addAnime);
   const removeAnime = useAnimeStore((state) => state.removeAnime);
   const reorder = useAnimeStore((state) => state.reorder);
   const updateTier = useAnimeStore((state) => state.updateTier);
   const remapTier = useAnimeStore((state) => state.remapTier);
 
+  const apiBase =
+    process.env.NEXT_PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8088";
+
   const { data, isLoading } = useSWR(
     keyword ? `/api/anime?q=${encodeURIComponent(keyword)}` : null,
     fetcher,
   );
+
+  useEffect(() => {
+    const savedToken = window.localStorage.getItem(TOKEN_KEY) || "";
+    const savedUser = window.localStorage.getItem(USERNAME_KEY) || "";
+
+    if (savedToken) {
+      setToken(savedToken);
+    }
+    if (savedUser) {
+      setCurrentUser(savedUser);
+      setAuthUsername(savedUser);
+    }
+  }, []);
+
+  const filteredSearch = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+
+    if (!searchText.trim()) {
+      return data;
+    }
+
+    return data.filter((item) =>
+      item.name.toLowerCase().includes(searchText.toLowerCase()),
+    );
+  }, [data, searchText]);
 
   const tierCountMap = useMemo(() => {
     const base: Record<string, number> = {};
@@ -261,20 +393,6 @@ export function AnimeDashboard() {
     0,
   );
   const statOtherCount = Math.max(0, list.length - statKnownCount);
-
-  const filteredSearch = useMemo(() => {
-    if (!data) {
-      return [];
-    }
-
-    if (!searchText.trim()) {
-      return data;
-    }
-
-    return data.filter((item) =>
-      item.name.toLowerCase().includes(searchText.toLowerCase()),
-    );
-  }, [data, searchText]);
 
   const gridCells = compactGrid(toNineGrid(list));
   const gridItems = gridCells.filter(
@@ -311,6 +429,7 @@ export function AnimeDashboard() {
   }, [list, uiConfig.tierLevels]);
 
   const panelItems: Array<{ key: PanelKey; label: string }> = [
+    { key: "cloud", label: uiConfig.panelTitles.cloud },
     { key: "search", label: uiConfig.panelTitles.search },
     { key: "rank", label: uiConfig.panelTitles.rank },
     { key: "tier", label: uiConfig.panelTitles.tier },
@@ -318,6 +437,309 @@ export function AnimeDashboard() {
     { key: "history", label: uiConfig.panelTitles.history },
     { key: "editor", label: uiConfig.panelTitles.editor },
   ];
+
+  const cloudSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        history: history.map((item) => ({
+          anime_id: item.animeId,
+          name: item.name,
+          cover: item.cover,
+          added_at: item.addedAt,
+        })),
+        rank: {
+          title: "前端自动同步快照",
+          tier_board_name: uiConfig.tierBoardName,
+          grid_board_name: uiConfig.gridBoardName,
+          payload: {
+            list,
+            uiConfig,
+          },
+        },
+      }),
+    [history, list, uiConfig],
+  );
+
+  const switchToOffline = useCallback((message?: string) => {
+    setBackendStatus("offline");
+    setToken("");
+    setCurrentUser("");
+    window.localStorage.removeItem(TOKEN_KEY);
+    setCloudMessage(message || "后端连接中断，请稍后重试");
+  }, []);
+
+  const requestWithTimeout = useCallback(
+    async (path: string, init?: RequestInit) => {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(
+        () => controller.abort(),
+        REQUEST_TIMEOUT_MS,
+      );
+
+      try {
+        const response = await fetch(`${apiBase}${path}`, {
+          ...init,
+          signal: controller.signal,
+        });
+
+        setBackendStatus("online");
+        return response;
+      } catch {
+        switchToOffline("后端连接失败，请先检查服务是否启动");
+        throw new Error("后端连接失败");
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+    },
+    [apiBase, switchToOffline],
+  );
+
+  const checkBackendStatus = useCallback(async () => {
+    try {
+      const response = await requestWithTimeout("/api/v1/me", {
+        method: "GET",
+      });
+
+      if (response.status === 401 || response.status === 403 || response.ok) {
+        setBackendStatus("online");
+      } else {
+        setBackendStatus("online");
+      }
+    } catch {
+      // offline state is already handled inside requestWithTimeout
+    }
+  }, [requestWithTimeout]);
+
+  const authedFetch = useCallback(
+    async (path: string, init?: RequestInit) => {
+      if (!token) {
+        throw new Error("请先登录");
+      }
+
+      const response = await requestWithTimeout(path, {
+        ...init,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          ...(init?.headers || {}),
+        },
+      });
+
+      return response;
+    },
+    [requestWithTimeout, token],
+  );
+
+  const loadCloudData = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+
+    setLoadingCloud(true);
+    setCloudMessage("正在拉取云端数据...");
+
+    try {
+      const meRes = await authedFetch("/api/v1/me");
+      if (!meRes.ok) {
+        throw new Error("会话失效，请重新登录");
+      }
+      const me = (await meRes.json()) as { username?: string };
+      const username = me.username || "";
+      setCurrentUser(username);
+      if (username) {
+        window.localStorage.setItem(USERNAME_KEY, username);
+      }
+
+      const historyRes = await authedFetch("/api/v1/history?limit=200");
+      if (historyRes.ok) {
+        const historyJson = (await historyRes.json()) as {
+          items?: Array<{
+            anime_id: number;
+            name: string;
+            cover: string;
+            added_at?: string;
+            created_at?: string;
+          }>;
+        };
+        const cloudHistory = (historyJson.items || []).map((item) => ({
+          animeId: item.anime_id,
+          name: item.name,
+          cover: item.cover,
+          addedAt: item.added_at || item.created_at || new Date().toISOString(),
+        }));
+        setHistory(cloudHistory);
+      }
+
+      const rankRes = await authedFetch("/api/v1/rank/latest");
+      if (rankRes.ok) {
+        const rankJson = (await rankRes.json()) as {
+          item?: { payload?: unknown } | null;
+        };
+        const parsed = parseCloudPayload(rankJson.item?.payload);
+        if (Array.isArray(parsed.list) && parsed.list.length > 0) {
+          setList(parsed.list);
+        }
+        if (parsed.uiConfig) {
+          setUiConfig((state) => normalizeConfig(parsed.uiConfig, state));
+        }
+      }
+
+      setCloudMessage("云端数据同步完成");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "加载失败";
+      setCloudMessage(message);
+      if (message.includes("会话失效")) {
+        setToken("");
+        setCurrentUser("");
+        window.localStorage.removeItem(TOKEN_KEY);
+      }
+      setBackendStatus("online");
+    } finally {
+      setLoadingCloud(false);
+    }
+  }, [authedFetch, setHistory, setList, token]);
+
+  useEffect(() => {
+    void checkBackendStatus();
+    const timer = window.setInterval(() => {
+      void checkBackendStatus();
+    }, HEALTH_CHECK_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [checkBackendStatus]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    window.localStorage.setItem(TOKEN_KEY, token);
+  }, [token]);
+
+  const submitAuth = async (mode: "login" | "register") => {
+    const username = authUsername.trim();
+    const password = authPassword;
+
+    if (!username || !password) {
+      setCloudMessage("请输入用户名和密码");
+      return;
+    }
+
+    setLoadingCloud(true);
+    setCloudMessage(mode === "login" ? "登录中..." : "注册中...");
+
+    try {
+      const response = await requestWithTimeout(`/api/v1/auth/${mode}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username,
+          password,
+        }),
+      });
+
+      const json = (await response.json()) as {
+        token?: string;
+        username?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !json.token) {
+        throw new Error(json.error || "认证失败");
+      }
+
+      setToken(json.token);
+      setCurrentUser(json.username || username);
+      window.localStorage.setItem(USERNAME_KEY, json.username || username);
+      setCloudMessage(mode === "login" ? "登录成功" : "注册并登录成功");
+      setBackendStatus("online");
+    } catch (error) {
+      setCloudMessage(error instanceof Error ? error.message : "认证失败");
+    } finally {
+      setLoadingCloud(false);
+    }
+  };
+
+  const logout = () => {
+    setToken("");
+    setCurrentUser("");
+    setCloudMessage("已退出登录");
+    window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(USERNAME_KEY);
+  };
+
+  const syncToCloud = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (!token) {
+        if (!options?.silent) {
+          setCloudMessage("请先登录");
+        }
+        return;
+      }
+
+      setSyncingCloud(true);
+      if (!options?.silent) {
+        setCloudMessage("正在上传到云端...");
+      }
+
+      try {
+        const response = await authedFetch("/api/v1/sync", {
+          method: "POST",
+          body: cloudSnapshot,
+        });
+
+        const json = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(json.error || "同步失败");
+        }
+
+        if (!options?.silent) {
+          setCloudMessage("上传成功，云端已保存当前本地数据");
+        }
+      } catch (error) {
+        setCloudMessage(error instanceof Error ? error.message : "同步失败");
+      } finally {
+        setSyncingCloud(false);
+      }
+    },
+    [authedFetch, cloudSnapshot, token],
+  );
+
+  const confirmPullFromCloud = () => {
+    if (!syncControlEnabled) {
+      setCloudMessage("请先开启同步控制，再选择同步方向");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "拉取云端将覆盖当前本地列表与历史记录，是否继续？",
+    );
+    if (!confirmed) {
+      setCloudMessage("已取消拉取操作");
+      return;
+    }
+
+    void loadCloudData();
+  };
+
+  const confirmPushToCloud = () => {
+    if (!syncControlEnabled) {
+      setCloudMessage("请先开启同步控制，再选择同步方向");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "上传本地将以当前本地数据生成云端新快照，是否继续？",
+    );
+    if (!confirmed) {
+      setCloudMessage("已取消上传操作");
+      return;
+    }
+
+    void syncToCloud();
+  };
 
   const updateTierLevel = (
     tier: AnimeItem["tier"],
@@ -540,6 +962,143 @@ export function AnimeDashboard() {
           <h1>{uiConfig.appTitle}</h1>
           <p>{uiConfig.appDescription}</p>
         </header>
+
+        {isVisible("cloud") ? (
+          <section className="panel cloud-panel">
+            <div className="panel-head">
+              <h2>{uiConfig.panelTitles.cloud}</h2>
+              <span
+                className={`cloud-state ${
+                  backendStatus === "checking"
+                    ? "checking"
+                    : backendStatus === "online"
+                      ? "online"
+                      : "offline"
+                }`}
+              >
+                {backendStatus === "checking"
+                  ? "连接检测中"
+                  : backendStatus === "online"
+                    ? token
+                      ? "后端在线 / 已登录"
+                      : "后端在线 / 未登录"
+                    : "后端离线"}
+              </span>
+            </div>
+
+            <div className="cloud-cards">
+              <div className="cloud-card auth-card">
+                <h3>账号</h3>
+                {token ? (
+                  <div className="cloud-summary">
+                    <p className="cloud-user">
+                      当前用户：{currentUser || authUsername}
+                    </p>
+                    <p className="cloud-user">登录成功后已隐藏登录输入框。</p>
+                    <div className="cloud-actions compact">
+                      <button
+                        className="ghost"
+                        onClick={() => void checkBackendStatus()}
+                        disabled={loadingCloud}
+                      >
+                        刷新连接状态
+                      </button>
+                      <button
+                        className="ghost danger"
+                        onClick={logout}
+                        disabled={!token}
+                      >
+                        退出
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="cloud-auth-grid">
+                      <input
+                        value={authUsername}
+                        onChange={(event) =>
+                          setAuthUsername(event.target.value)
+                        }
+                        placeholder="用户名"
+                      />
+                      <input
+                        value={authPassword}
+                        onChange={(event) =>
+                          setAuthPassword(event.target.value)
+                        }
+                        placeholder="密码"
+                        type="password"
+                      />
+                    </div>
+                    <div className="cloud-actions compact">
+                      <button
+                        className="primary"
+                        onClick={() => submitAuth("login")}
+                        disabled={loadingCloud || backendStatus === "offline"}
+                      >
+                        登录
+                      </button>
+                      <button
+                        className="ghost"
+                        onClick={() => submitAuth("register")}
+                        disabled={loadingCloud || backendStatus === "offline"}
+                      >
+                        注册
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              <div className="cloud-card sync-card">
+                <h3>同步控制</h3>
+                <label className="cloud-toggle">
+                  <input
+                    type="checkbox"
+                    checked={syncControlEnabled}
+                    onChange={(event) =>
+                      setSyncControlEnabled(event.target.checked)
+                    }
+                  />
+                  <span>启用手动同步操作（默认关闭）</span>
+                </label>
+                <p className="cloud-user">
+                  请选择上传本地或拉取云端
+                </p>
+
+                <div className="cloud-actions">
+                  <button
+                    className="ghost"
+                    onClick={confirmPullFromCloud}
+                    disabled={
+                      loadingCloud ||
+                      !token ||
+                      backendStatus !== "online" ||
+                      !syncControlEnabled
+                    }
+                  >
+                    拉取云端
+                  </button>
+                  <button
+                    className="primary"
+                    onClick={confirmPushToCloud}
+                    disabled={
+                      syncingCloud ||
+                      !token ||
+                      backendStatus !== "online" ||
+                      !syncControlEnabled
+                    }
+                  >
+                    {syncingCloud ? "上传中..." : "立即上传"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <p className="cloud-message">{cloudMessage || "未连接云端"}</p>
+          </section>
+        ) : null}
 
         <section className="panel stats">
           <div>

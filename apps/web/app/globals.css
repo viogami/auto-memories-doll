@@ -107,6 +107,96 @@ select {
   padding: 18px;
 }
 
+.cloud-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.cloud-state {
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.cloud-state.online {
+  background: #dff8e8;
+  color: #13653a;
+}
+
+.cloud-state.offline {
+  background: #eef2f7;
+  color: #5d6f86;
+}
+
+.cloud-state.checking {
+  background: #fff4dc;
+  color: #8f640e;
+}
+
+.cloud-cards {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 12px;
+}
+
+.cloud-card {
+  border: 1px solid #d9e3f2;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #fbfdff 0%, #f4f8ff 100%);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.cloud-card h3 {
+  font-size: 1rem;
+  color: #1f3658;
+}
+
+.cloud-user {
+  color: #3f5574;
+  font-size: 0.92rem;
+}
+
+.cloud-summary {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.cloud-auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cloud-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cloud-actions.compact {
+  gap: 8px;
+}
+
+.cloud-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #3f5674;
+  font-size: 0.92rem;
+}
+
+.cloud-message {
+  border: 1px solid #d8e3f3;
+  background: #f4f8ff;
+  color: #2c496f;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
 .stats {
   display: grid;
   gap: 12px;
@@ -459,6 +549,11 @@ select {
   }
 
   .editor-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cloud-cards,
+  .cloud-auth-grid {
     grid-template-columns: 1fr;
   }
 

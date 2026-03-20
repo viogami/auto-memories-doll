@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -8,8 +8,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  Switch,
   View,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import DraggableFlatList, {
   type RenderItemParams,
   ScaleDecorator,
@@ -24,6 +26,10 @@ import {
   useAnimeStore,
 } from "@repo/anime-core";
 
+const CLOUD_API_BASE = "http://localhost:8088";
+const MOBILE_TOKEN_KEY = "am_mobile_cloud_token";
+const MOBILE_USER_KEY = "am_mobile_cloud_username";
+
 const tierOrder = ["S", "A", "B", "C", "Unrated"] as const;
 
 export default function App() {
@@ -31,12 +37,288 @@ export default function App() {
   const [isLoading, setLoading] = useState(false);
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
   const [results, setResults] = useState<Anime[]>([]);
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [token, setToken] = useState("");
+  const [currentUser, setCurrentUser] = useState("");
+  const [cloudMessage, setCloudMessage] = useState("未连接云端");
+  const [loadingCloud, setLoadingCloud] = useState(false);
+  const [syncingCloud, setSyncingCloud] = useState(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+
+  const applyingCloudDataRef = useRef(false);
+  const skipNextAutoSyncRef = useRef(false);
+  const lastSyncedSnapshotRef = useRef("");
 
   const list = useAnimeStore((state) => state.list);
   const history = useAnimeStore((state) => state.history);
+  const setList = useAnimeStore((state) => state.setList);
+  const setHistory = useAnimeStore((state) => state.setHistory);
   const addAnime = useAnimeStore((state) => state.addAnime);
   const reorder = useAnimeStore((state) => state.reorder);
   const updateTier = useAnimeStore((state) => state.updateTier);
+
+  const cloudSnapshot = useMemo(
+    () =>
+      JSON.stringify({
+        history: history.map((item) => ({
+          anime_id: item.animeId,
+          name: item.name,
+          cover: item.cover,
+          added_at: item.addedAt,
+        })),
+        rank: {
+          title: "mobile 自动同步快照",
+          tier_board_name: "MOBILE TIER BOARD",
+          grid_board_name: "MOBILE GRID",
+          payload: {
+            list,
+          },
+        },
+      }),
+    [history, list],
+  );
+
+  const authedFetch = async (path: string, init?: RequestInit) => {
+    if (!token) {
+      throw new Error("请先登录");
+    }
+
+    return fetch(`${CLOUD_API_BASE}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(init?.headers || {}),
+      },
+    });
+  };
+
+  const parseCloudPayload = (
+    payload: unknown,
+  ): {
+    list?: AnimeItem[];
+  } => {
+    let raw = payload;
+
+    if (typeof payload === "string") {
+      try {
+        raw = JSON.parse(payload);
+      } catch {
+        return {};
+      }
+    }
+
+    if (!raw || typeof raw !== "object") {
+      return {};
+    }
+
+    return raw as {
+      list?: AnimeItem[];
+    };
+  };
+
+  const loadCloudData = async () => {
+    if (!token) {
+      return;
+    }
+
+    setLoadingCloud(true);
+    setCloudMessage("正在拉取云端数据...");
+
+    try {
+      applyingCloudDataRef.current = true;
+      const meRes = await authedFetch("/api/v1/me");
+      if (!meRes.ok) {
+        throw new Error("会话失效，请重新登录");
+      }
+      const me = (await meRes.json()) as { username?: string };
+      const username = me.username || "";
+      setCurrentUser(username);
+      if (username) {
+        await AsyncStorage.setItem(MOBILE_USER_KEY, username);
+      }
+
+      const historyRes = await authedFetch("/api/v1/history?limit=200");
+      if (historyRes.ok) {
+        const historyJson = (await historyRes.json()) as {
+          items?: Array<{
+            anime_id: number;
+            name: string;
+            cover: string;
+            added_at?: string;
+            created_at?: string;
+          }>;
+        };
+        const cloudHistory = (historyJson.items || []).map((item) => ({
+          animeId: item.anime_id,
+          name: item.name,
+          cover: item.cover,
+          addedAt: item.added_at || item.created_at || new Date().toISOString(),
+        }));
+        setHistory(cloudHistory);
+      }
+
+      const rankRes = await authedFetch("/api/v1/rank/latest");
+      if (rankRes.ok) {
+        const rankJson = (await rankRes.json()) as {
+          item?: { payload?: unknown } | null;
+        };
+        const parsed = parseCloudPayload(rankJson.item?.payload);
+        if (Array.isArray(parsed.list)) {
+          setList(parsed.list);
+        }
+      }
+
+      skipNextAutoSyncRef.current = true;
+      lastSyncedSnapshotRef.current = "";
+      setCloudMessage("云端同步完成");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "拉取失败";
+      setCloudMessage(message);
+      if (message.includes("会话失效")) {
+        setToken("");
+        setCurrentUser("");
+        await AsyncStorage.removeItem(MOBILE_TOKEN_KEY);
+      }
+    } finally {
+      applyingCloudDataRef.current = false;
+      setLoadingCloud(false);
+    }
+  };
+
+  const syncToCloud = async (silent?: boolean) => {
+    if (!token) {
+      if (!silent) {
+        setCloudMessage("请先登录");
+      }
+      return;
+    }
+
+    setSyncingCloud(true);
+    if (!silent) {
+      setCloudMessage("上传中...");
+    }
+
+    try {
+      const response = await authedFetch("/api/v1/sync", {
+        method: "POST",
+        body: cloudSnapshot,
+      });
+      const json = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(json.error || "上传失败");
+      }
+
+      lastSyncedSnapshotRef.current = cloudSnapshot;
+      if (!silent) {
+        setCloudMessage("云端已保存当前数据");
+      }
+    } catch (error) {
+      setCloudMessage(error instanceof Error ? error.message : "上传失败");
+    } finally {
+      setSyncingCloud(false);
+    }
+  };
+
+  const submitAuth = async (mode: "login" | "register") => {
+    const username = authUsername.trim();
+    const password = authPassword;
+
+    if (!username || !password) {
+      setCloudMessage("请输入用户名和密码");
+      return;
+    }
+
+    setLoadingCloud(true);
+    setCloudMessage(mode === "login" ? "登录中..." : "注册中...");
+
+    try {
+      const response = await fetch(`${CLOUD_API_BASE}/api/v1/auth/${mode}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const json = (await response.json()) as {
+        token?: string;
+        username?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !json.token) {
+        throw new Error(json.error || "认证失败");
+      }
+
+      setToken(json.token);
+      setCurrentUser(json.username || username);
+      await AsyncStorage.setItem(MOBILE_TOKEN_KEY, json.token);
+      await AsyncStorage.setItem(MOBILE_USER_KEY, json.username || username);
+      setCloudMessage(mode === "login" ? "登录成功" : "注册并登录成功");
+    } catch (error) {
+      setCloudMessage(error instanceof Error ? error.message : "认证失败");
+    } finally {
+      setLoadingCloud(false);
+    }
+  };
+
+  const logout = async () => {
+    setToken("");
+    setCurrentUser("");
+    setCloudMessage("已退出登录");
+    await AsyncStorage.removeItem(MOBILE_TOKEN_KEY);
+    await AsyncStorage.removeItem(MOBILE_USER_KEY);
+  };
+
+  useEffect(() => {
+    const initCloud = async () => {
+      const savedToken = (await AsyncStorage.getItem(MOBILE_TOKEN_KEY)) || "";
+      const savedUser = (await AsyncStorage.getItem(MOBILE_USER_KEY)) || "";
+
+      if (savedToken) {
+        setToken(savedToken);
+      }
+      if (savedUser) {
+        setCurrentUser(savedUser);
+        setAuthUsername(savedUser);
+      }
+    };
+
+    void initCloud();
+  }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    void AsyncStorage.setItem(MOBILE_TOKEN_KEY, token);
+    void loadCloudData();
+  }, [token]);
+
+  useEffect(() => {
+    if (!token || !autoSyncEnabled || applyingCloudDataRef.current) {
+      return;
+    }
+
+    if (skipNextAutoSyncRef.current) {
+      skipNextAutoSyncRef.current = false;
+      return;
+    }
+
+    if (cloudSnapshot === lastSyncedSnapshotRef.current) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      void syncToCloud(true);
+    }, 1800);
+
+    return () => clearTimeout(timer);
+  }, [autoSyncEnabled, cloudSnapshot, token]);
 
   useEffect(() => {
     if (!keyword.trim()) {
@@ -156,6 +438,84 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.h1}>auto-memories-doll</Text>
         <Text style={styles.desc}>跨端动漫管理：搜索、收藏、Rank、九宫格</Text>
+
+        <View style={styles.panel}>
+          <View style={styles.cloudHead}>
+            <Text style={styles.h2}>云端同步</Text>
+            <Text
+              style={[styles.badge, token ? styles.online : styles.offline]}
+            >
+              {token ? "已连接" : "未登录"}
+            </Text>
+          </View>
+          <Text style={styles.score}>
+            {currentUser
+              ? `当前用户：${currentUser}`
+              : "登录后与 Web 端共享数据"}
+          </Text>
+          <TextInput
+            value={authUsername}
+            onChangeText={setAuthUsername}
+            placeholder="用户名"
+            style={styles.input}
+          />
+          <TextInput
+            value={authPassword}
+            onChangeText={setAuthPassword}
+            placeholder="密码"
+            secureTextEntry
+            style={styles.input}
+          />
+          <View style={styles.actionRow}>
+            <Pressable
+              onPress={() => void submitAuth("login")}
+              style={styles.addBtn}
+              disabled={loadingCloud}
+            >
+              <Text style={styles.addText}>登录</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void submitAuth("register")}
+              style={styles.ghostBtn}
+              disabled={loadingCloud}
+            >
+              <Text style={styles.ghostText}>注册</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void logout()}
+              style={styles.ghostBtn}
+              disabled={!token}
+            >
+              <Text style={styles.ghostText}>退出</Text>
+            </Pressable>
+          </View>
+          <View style={styles.actionRow}>
+            <Pressable
+              onPress={() => void loadCloudData()}
+              style={styles.ghostBtn}
+              disabled={!token || loadingCloud}
+            >
+              <Text style={styles.ghostText}>拉取云端</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => void syncToCloud()}
+              style={styles.addBtn}
+              disabled={!token || syncingCloud}
+            >
+              <Text style={styles.addText}>
+                {syncingCloud ? "上传中..." : "立即上传"}
+              </Text>
+            </Pressable>
+          </View>
+          <View style={styles.autoSyncRow}>
+            <Text style={styles.score}>自动同步（变更后 1.8 秒）</Text>
+            <Switch
+              value={autoSyncEnabled}
+              onValueChange={setAutoSyncEnabled}
+            />
+          </View>
+          <Text style={styles.cloudMessage}>{cloudMessage}</Text>
+        </View>
 
         <View style={styles.panel}>
           <Text style={styles.h2}>计数器</Text>
@@ -393,6 +753,56 @@ const styles = StyleSheet.create({
   addText: {
     color: "#fff",
     fontWeight: "600",
+  },
+  ghostBtn: {
+    backgroundColor: "#eef3fb",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  ghostText: {
+    color: "#35557d",
+    fontWeight: "600",
+  },
+  actionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  cloudHead: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  badge: {
+    fontSize: 11,
+    fontWeight: "700",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  online: {
+    backgroundColor: "#dff8e8",
+    color: "#145a3a",
+  },
+  offline: {
+    backgroundColor: "#eef2f7",
+    color: "#5d6f86",
+  },
+  autoSyncRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  cloudMessage: {
+    borderWidth: 1,
+    borderColor: "#d8e3f3",
+    borderRadius: 10,
+    backgroundColor: "#f4f8ff",
+    color: "#2c496f",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
   },
   rankItem: {
     flexDirection: "row",

@@ -1,6 +1,7 @@
 import type { AnimeItem } from "@repo/anime-core";
 
 export type PanelKey =
+  | "cloud"
   | "search"
   | "rank"
   | "tier"
@@ -34,6 +35,7 @@ export const DASHBOARD_CONFIG: DashboardConfig = {
   sidebarHint: "默认展示搜索和排行，点击可切换其它模块。",
   defaultPanels: ["search", "rank"] as PanelKey[],
   panelTitles: {
+    cloud: "云端同步",
     search: "Bangumi 搜索",
     rank: "Rank 排行（拖拽）",
     tier: "Tier Rank 图生成器",

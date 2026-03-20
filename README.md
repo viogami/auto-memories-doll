@@ -1,4 +1,4 @@
-# auto-memories-doll 👉[立即体验](https://viogami.github.io/blog/index.html)
+# auto-memories-doll 👉[立即体验](https://viogami.github.io/blog)
 
 跨端动漫管理应用（Web + Mobile），前端为静态页面，可以单独启动，数据保存在本地。
 

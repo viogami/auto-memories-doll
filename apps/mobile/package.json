@@ -12,6 +12,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@repo/anime-core": "*",
     "expo": "^53.0.20",
     "expo-status-bar": "~2.2.3",
