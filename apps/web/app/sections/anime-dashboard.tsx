@@ -329,6 +329,7 @@ export function AnimeDashboard() {
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const tierRef = useRef<HTMLDivElement | null>(null);
+  const autoPulledTokenRef = useRef("");
 
   const list = useAnimeStore((state) => state.list);
   const history = useAnimeStore((state) => state.history);
@@ -341,7 +342,7 @@ export function AnimeDashboard() {
   const remapTier = useAnimeStore((state) => state.remapTier);
 
   const apiBase = (
-    process.env.NEXT_PUBLIC_CLOUD_API_BASE?.trim() ||  "http://localhost:8080/CH"
+    process.env.NEXT_PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8080/CH"
   ).replace(/\/+$/, "");
 
   const { data, isLoading } = useSWR(
@@ -618,6 +619,24 @@ export function AnimeDashboard() {
 
     window.localStorage.setItem(TOKEN_KEY, token);
   }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      autoPulledTokenRef.current = "";
+      return;
+    }
+
+    if (syncControlEnabled) {
+      return;
+    }
+
+    if (autoPulledTokenRef.current === token) {
+      return;
+    }
+
+    autoPulledTokenRef.current = token;
+    void loadCloudData();
+  }, [loadCloudData, syncControlEnabled, token]);
 
   const submitAuth = async (mode: "login" | "register") => {
     const username = authUsername.trim();
@@ -1066,7 +1085,9 @@ export function AnimeDashboard() {
                   />
                   <span>启用手动同步操作（默认关闭）</span>
                 </label>
-                <p className="cloud-user">请选择上传本地或拉取云端</p>
+                <p className="cloud-user">
+                  未勾选时，登录后会自动拉取云端；勾选后可手动选择同步方向
+                </p>
 
                 <div className="cloud-actions">
                   <button
