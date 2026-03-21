@@ -30,8 +30,10 @@ import {
   useAnimeStore,
 } from "@repo/anime-core";
 
-const CLOUD_API_BASE =
-  process.env.PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8080/CH";
+const CH_API_BASE =
+  process.env.EXPO_PUBLIC_CH_API_BASE?.trim() ||
+  process.env.CH_API_BASE?.trim() ||
+  "http://localhost:8080/CH";
 const MOBILE_TOKEN_KEY =
   process.env.EXPO_PUBLIC_MOBILE_TOKEN_KEY?.trim() || "am_mobile_cloud_token";
 const MOBILE_USER_KEY =
@@ -215,7 +217,7 @@ export default function App() {
       throw new Error("请先登录");
     }
 
-    return fetch(`${CLOUD_API_BASE}${path}`, {
+    return fetch(`${CH_API_BASE}${path}`, {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -371,7 +373,7 @@ export default function App() {
     setCloudMessage(mode === "login" ? "登录中..." : "注册中...");
 
     try {
-      const response = await fetch(`${CLOUD_API_BASE}/api/v1/auth/${mode}`, {
+      const response = await fetch(`${CH_API_BASE}/api/v1/auth/${mode}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

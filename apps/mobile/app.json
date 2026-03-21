@@ -5,17 +5,25 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "com.auto.memories.doll",
       "adaptiveIcon": {
         "backgroundColor": "#f2f4f8"
       }
     },
     "web": {
       "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1e61bd95-5de1-436a-a5b5-e87531989621"
+      }
     }
   }
 }

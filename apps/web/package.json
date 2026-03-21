@@ -2,13 +2,21 @@
   "name": "web",
   "version": "0.1.0",
   "type": "module",
+  "main": "electron/main.cjs",
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
-    "check-types": "next typegen && tsc --noEmit"
+    "check-types": "next typegen && tsc --noEmit",
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync android",
+    "android:open": "npx cap open android",
+    "desktop:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:3000 && cross-env ELECTRON_START_URL=http://localhost:3000 electron electron/main.cjs\"",
+    "desktop:prepare": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/prepare-electron-build.ps1",
+    "desktop:pack:dir": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/pack-electron-dir.ps1",
+    "desktop:pack": "npm run desktop:prepare && electron-builder --win nsis"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -16,6 +24,7 @@
     "@dnd-kit/utilities": "^3.2.2",
     "@repo/anime-core": "*",
     "@repo/ui": "*",
+    "@capacitor/core": "^7.4.3",
     "html-to-image": "^1.11.13",
     "next": "16.2.0",
     "react": "^19.2.0",
@@ -23,12 +32,35 @@
     "swr": "^2.3.6"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.4.3",
+    "@capacitor/cli": "^7.4.3",
     "@repo/eslint-config": "*",
     "@repo/typescript-config": "*",
     "@types/node": "^22.15.3",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "37.10.3",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.39.1",
+    "wait-on": "^8.0.5",
     "typescript": "5.9.2"
+  },
+  "build": {
+    "appId": "com.auto.memories.doll.desktop",
+    "productName": "AutoMemoriesDoll",
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
   }
 }

@@ -41,7 +41,7 @@ const TOKEN_KEY =
 const USERNAME_KEY =
   process.env.NEXT_PUBLIC_CLOUD_USER_KEY?.trim() || "am_cloud_username";
 const REQUEST_TIMEOUT_MS = 7000;
-const HEALTH_CHECK_INTERVAL_MS = 12000;
+const HEALTH_CHECK_INTERVAL_MS = 20000;
 
 const fetcher = async (url: string): Promise<Anime[]> => {
   const response = await fetch(url);
@@ -340,8 +340,9 @@ export function AnimeDashboard() {
   const updateTier = useAnimeStore((state) => state.updateTier);
   const remapTier = useAnimeStore((state) => state.remapTier);
 
-  const apiBase =
-    process.env.PUBLIC_CLOUD_API_BASE?.trim() || "http://localhost:8080/CH";
+  const apiBase = (
+    process.env.NEXT_PUBLIC_CLOUD_API_BASE?.trim() ||  "http://localhost:8080/CH"
+  ).replace(/\/+$/, "");
 
   const { data, isLoading } = useSWR(
     keyword ? `/api/anime?q=${encodeURIComponent(keyword)}` : null,
@@ -498,19 +499,19 @@ export function AnimeDashboard() {
 
   const checkBackendStatus = useCallback(async () => {
     try {
-      const response = await requestWithTimeout("/api/v1/me", {
+      const response = await requestWithTimeout("/healthz", {
         method: "GET",
       });
 
-      if (response.status === 401 || response.status === 403 || response.ok) {
+      if (response.ok) {
         setBackendStatus("online");
       } else {
-        setBackendStatus("online");
+        switchToOffline("后端服务响应异常，请检查服务状态");
       }
     } catch {
       // offline state is already handled inside requestWithTimeout
     }
-  }, [requestWithTimeout]);
+  }, [requestWithTimeout, switchToOffline]);
 
   const authedFetch = useCallback(
     async (path: string, init?: RequestInit) => {
@@ -1065,9 +1066,7 @@ export function AnimeDashboard() {
                   />
                   <span>启用手动同步操作（默认关闭）</span>
                 </label>
-                <p className="cloud-user">
-                  请选择上传本地或拉取云端
-                </p>
+                <p className="cloud-user">请选择上传本地或拉取云端</p>
 
                 <div className="cloud-actions">
                   <button

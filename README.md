@@ -16,10 +16,10 @@
 - rank等级文本，颜色，完全自定义配置！
 - 支持上传云端，永远保存你的记录！
 
-![alt text](apps/docs/public/app-0.png)
-![alt text](apps/docs/public/app-1.png)
-![alt text](apps/docs/public/app-2.png)
-![alt text](apps/docs/public/app-3.png)
+![alt text](static/app-0.png)
+![alt text](static/app-1.png)
+![alt text](static/app-2.png)
+![alt text](static/app-3.png)
 
 ## 前端完全由ai生成
 
@@ -29,7 +29,15 @@
 
 给ai大人跪了，甚至自动知道调用bangumi的api，而且调用逻辑完成正确，我的天，甚至甚至包括这个md文件都是ai执笔😲
 
-![ai生成设计方案](apps/docs/public/ai-.png)
+![ai生成设计方案](static/ai-.png)
+
+## 多端构建
+
+使用next，原生支持web，可用electron打包桌面端，移动端也构建了快速打包方案。
+
+- `apps/docs` 文档站，未用，保留
+- `apps/mobile` 移动端，可用EAS云端构建
+- `apps/web` 包含网页端和electron构建，PACKAGING.md文档有详细构建说明
 
 ## Monorepo 结构
 
@@ -62,14 +70,6 @@ npm run dev --workspace=web
 
 ```bash
 npm run dev --workspace=mobile
-```
-
-## 校验命令
-
-```bash
-npm run check-types --workspace=web
-npm run check-types --workspace=mobile
-npm run check-types --workspace=@repo/anime-core
 ```
 
 ## 已实现的共享策略
