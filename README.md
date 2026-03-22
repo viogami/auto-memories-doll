@@ -88,3 +88,5 @@ npm run dev --workspace=mobile
 - `packages/anime-core/src/grid.ts`
 
 ## 👉[更详细的本人博客](https://viogami.github.io/blog/project/auto-memories-doll/index.html)
+
+## 👉[B站视频](https://www.bilibili.com/video/BV1sFAFzPE6t/#reply116265721007210)
