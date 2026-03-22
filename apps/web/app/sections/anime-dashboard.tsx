@@ -73,7 +73,6 @@ export function AnimeDashboard() {
   const [searchText, setSearchText] = useState("");
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
   const [showRemovedHistory, setShowRemovedHistory] = useState(false);
-  const [historyTierFilter, setHistoryTierFilter] = useState("all");
   const [historyNameFilter, setHistoryNameFilter] = useState("");
 
   const [uiConfig, setUiConfig] =
@@ -107,8 +106,10 @@ export function AnimeDashboard() {
 
   const list = useAnimeStore((state) => state.list);
   const history = useAnimeStore((state) => state.history);
+  const removedHistory = useAnimeStore((state) => state.removedHistory);
   const setList = useAnimeStore((state) => state.setList);
   const setHistory = useAnimeStore((state) => state.setHistory);
+  const setRemovedHistory = useAnimeStore((state) => state.setRemovedHistory);
   const addAnime = useAnimeStore((state) => state.addAnime);
   const removeAnime = useAnimeStore((state) => state.removeAnime);
   const reorder = useAnimeStore((state) => state.reorder);
@@ -184,56 +185,38 @@ export function AnimeDashboard() {
     return historyOrder === "asc" ? next : next.reverse();
   }, [history, historyOrder]);
 
-  const currentTierByAnimeId = useMemo(() => {
-    return new Map(list.map((item) => [item.id, item.tier]));
-  }, [list]);
+  const sortedRemovedHistory = useMemo(() => {
+    const next = [...removedHistory].sort(
+      (a, b) =>
+        new Date(a.removedAt).getTime() - new Date(b.removedAt).getTime(),
+    );
 
-  const historyTierOptions = useMemo(() => {
-    const fromConfig = uiConfig.tierLevels.map((item) => item.tier);
-    const fromList = list.map((item) => item.tier);
-
-    return Array.from(new Set([...fromConfig, ...fromList]));
-  }, [list, uiConfig.tierLevels]);
+    return historyOrder === "asc" ? next : next.reverse();
+  }, [historyOrder, removedHistory]);
 
   const filteredHistory = useMemo(() => {
     const trimmedName = historyNameFilter.trim().toLowerCase();
 
     return sortedHistory.filter((record) => {
-      const action = record.action || "add";
-      const currentTier = currentTierByAnimeId.get(record.animeId);
-      const isDeletedNow = !currentTier;
-
-      if (!showRemovedHistory && (action === "remove" || isDeletedNow)) {
-        return false;
-      }
-
-      if (historyTierFilter !== "all") {
-        if (currentTier !== historyTierFilter) {
-          return false;
-        }
-      }
-
       if (trimmedName && !record.name.toLowerCase().includes(trimmedName)) {
         return false;
       }
 
       return true;
     });
-  }, [
-    currentTierByAnimeId,
-    historyNameFilter,
-    historyTierFilter,
-    showRemovedHistory,
-    sortedHistory,
-  ]);
+  }, [historyNameFilter, sortedHistory]);
 
-  const tierLabelMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const level of uiConfig.tierLevels) {
-      map.set(level.tier, level.label);
-    }
-    return map;
-  }, [uiConfig.tierLevels]);
+  const filteredRemovedHistory = useMemo(() => {
+    const trimmedName = historyNameFilter.trim().toLowerCase();
+
+    return sortedRemovedHistory.filter((record) => {
+      if (trimmedName && !record.name.toLowerCase().includes(trimmedName)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [historyNameFilter, sortedRemovedHistory]);
 
   const tierGroups = useMemo(() => {
     const knownRows = uiConfig.tierLevels.map((row) => ({
@@ -269,14 +252,12 @@ export function AnimeDashboard() {
   const cloudSnapshot = useMemo(
     () =>
       JSON.stringify({
-        history: history
-          .filter((item) => (item.action || "add") !== "remove")
-          .map((item) => ({
-            anime_id: item.animeId,
-            name: item.name,
-            cover: item.cover,
-            added_at: item.addedAt,
-          })),
+        history: history.map((item) => ({
+          anime_id: item.animeId,
+          name: item.name,
+          cover: item.cover,
+          added_at: item.addedAt,
+        })),
         rank: {
           title: "前端自动同步快照",
           tier_board_name: uiConfig.tierBoardName,
@@ -398,6 +379,7 @@ export function AnimeDashboard() {
           addedAt: item.added_at || item.created_at || new Date().toISOString(),
         }));
         setHistory(cloudHistory);
+        setRemovedHistory([]);
       }
 
       const rankRes = await authedFetch("/api/v1/rank/latest");
@@ -427,7 +409,7 @@ export function AnimeDashboard() {
     } finally {
       setLoadingCloud(false);
     }
-  }, [authedFetch, setHistory, setList, token]);
+  }, [authedFetch, setHistory, setList, setRemovedHistory, token]);
 
   useEffect(() => {
     void checkBackendStatus();
@@ -1022,17 +1004,13 @@ export function AnimeDashboard() {
           <HistoryPanel
             panelTitle={uiConfig.panelTitles.history}
             showRemovedHistory={showRemovedHistory}
-            historyTierFilter={historyTierFilter}
-            historyTierOptions={historyTierOptions}
             historyNameFilter={historyNameFilter}
             historyOrder={historyOrder}
             filteredHistory={filteredHistory}
-            currentTierByAnimeId={currentTierByAnimeId}
-            tierLabelMap={tierLabelMap}
+            filteredRemovedHistory={filteredRemovedHistory}
             onToggleShowRemovedHistory={() =>
               setShowRemovedHistory((value) => !value)
             }
-            onHistoryTierFilterChange={setHistoryTierFilter}
             onHistoryNameFilterChange={setHistoryNameFilter}
             onHistoryOrderChange={setHistoryOrder}
           />

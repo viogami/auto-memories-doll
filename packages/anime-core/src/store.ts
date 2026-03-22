@@ -1,14 +1,34 @@
 import { create } from "zustand";
 
 import { computeTier } from "./rank";
-import type { Anime, AnimeItem, HistoryRecord, Tier } from "./types";
+import type {
+  Anime,
+  AnimeItem,
+  HistoryRecord,
+  RemovedHistoryRecord,
+  Tier,
+} from "./types";
+
+const normalizeHistory = (history: HistoryRecord[]): HistoryRecord[] => {
+  const sortedByTime = [...history].sort(
+    (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
+  );
+
+  return sortedByTime.map((item, index) => ({
+    ...item,
+    sequence: item.sequence ?? index + 1,
+  }));
+};
 
 type AnimeStore = {
   list: AnimeItem[];
   history: HistoryRecord[];
+  removedHistory: RemovedHistoryRecord[];
+  historySequence: number;
   selectedTag: string;
   setList: (list: AnimeItem[]) => void;
   setHistory: (history: HistoryRecord[]) => void;
+  setRemovedHistory: (history: RemovedHistoryRecord[]) => void;
   addAnime: (anime: Anime, availableTiers?: Tier[]) => void;
   removeAnime: (id: number) => void;
   reorder: (next: AnimeItem[]) => void;
@@ -21,14 +41,29 @@ type AnimeStore = {
 export const useAnimeStore = create<AnimeStore>((set) => ({
   list: [],
   history: [],
+  removedHistory: [],
+  historySequence: 0,
   selectedTag: "all",
   setList: (list) =>
     set(() => ({
       list,
     })),
   setHistory: (history) =>
+    set((state) => {
+      const normalized = normalizeHistory(history);
+      const maxSequence = normalized.reduce(
+        (max, item) => Math.max(max, item.sequence || 0),
+        0,
+      );
+
+      return {
+        history: normalized,
+        historySequence: Math.max(state.historySequence, maxSequence),
+      };
+    }),
+  setRemovedHistory: (history) =>
     set(() => ({
-      history,
+      removedHistory: history,
     })),
   addAnime: (anime, availableTiers) =>
     set((state) => {
@@ -44,19 +79,19 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
         tags: [],
         addedAt: new Date().toISOString(),
       };
+      const nextSequence = state.historySequence + 1;
+      const historyRecord: HistoryRecord = {
+        animeId: record.id,
+        name: record.name,
+        cover: record.cover,
+        addedAt: record.addedAt,
+        sequence: nextSequence,
+      };
 
       return {
         list: [record, ...state.list],
-        history: [
-          {
-            animeId: record.id,
-            name: record.name,
-            cover: record.cover,
-            addedAt: record.addedAt,
-            action: "add",
-          },
-          ...state.history,
-        ],
+        history: [...state.history, historyRecord],
+        historySequence: nextSequence,
       };
     }),
   removeAnime: (id) =>
@@ -66,17 +101,22 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
         return state;
       }
 
+      const lastAddedRecord = [...state.history]
+        .reverse()
+        .find((item) => item.animeId === id);
+
       return {
         list: state.list.filter((item) => item.id !== id),
-        history: [
+        removedHistory: [
+          ...state.removedHistory,
           {
             animeId: target.id,
             name: target.name,
             cover: target.cover,
-            addedAt: new Date().toISOString(),
-            action: "remove",
+            removedAt: new Date().toISOString(),
+            addedAt: lastAddedRecord?.addedAt,
+            sequence: lastAddedRecord?.sequence,
           },
-          ...state.history,
         ],
       };
     }),

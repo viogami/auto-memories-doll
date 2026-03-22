@@ -1,18 +1,14 @@
-import type { HistoryRecord } from "@repo/anime-core";
+import type { HistoryRecord, RemovedHistoryRecord } from "@repo/anime-core";
 import Image from "next/image";
 
 type HistoryPanelProps = {
   panelTitle: string;
   showRemovedHistory: boolean;
-  historyTierFilter: string;
-  historyTierOptions: string[];
   historyNameFilter: string;
   historyOrder: "desc" | "asc";
   filteredHistory: HistoryRecord[];
-  currentTierByAnimeId: Map<number, string>;
-  tierLabelMap: Map<string, string>;
+  filteredRemovedHistory: RemovedHistoryRecord[];
   onToggleShowRemovedHistory: () => void;
-  onHistoryTierFilterChange: (value: string) => void;
   onHistoryNameFilterChange: (value: string) => void;
   onHistoryOrderChange: (value: "desc" | "asc") => void;
 };
@@ -20,18 +16,18 @@ type HistoryPanelProps = {
 export function HistoryPanel({
   panelTitle,
   showRemovedHistory,
-  historyTierFilter,
-  historyTierOptions,
   historyNameFilter,
   historyOrder,
   filteredHistory,
-  currentTierByAnimeId,
-  tierLabelMap,
+  filteredRemovedHistory,
   onToggleShowRemovedHistory,
-  onHistoryTierFilterChange,
   onHistoryNameFilterChange,
   onHistoryOrderChange,
 }: HistoryPanelProps) {
+  const displayRecords = showRemovedHistory
+    ? filteredRemovedHistory
+    : filteredHistory;
+
   return (
     <section className="panel history-panel">
       <div className="panel-head">
@@ -41,27 +37,15 @@ export function HistoryPanel({
             className={`ghost ${showRemovedHistory ? "active" : ""}`}
             onClick={onToggleShowRemovedHistory}
           >
-            {showRemovedHistory ? "隐藏删除记录" : "显示删除记录"}
+            {showRemovedHistory ? "查看添加历史" : "查看删除列表"}
           </button>
-          <span>按 rank</span>
-          <select
-            value={historyTierFilter}
-            onChange={(event) => onHistoryTierFilterChange(event.target.value)}
-          >
-            <option value="all">全部等级</option>
-            {historyTierOptions.map((tier) => (
-              <option key={tier} value={tier}>
-                {tierLabelMap.get(tier) || tier}
-              </option>
-            ))}
-          </select>
           <span>名称</span>
           <input
             value={historyNameFilter}
             onChange={(event) => onHistoryNameFilterChange(event.target.value)}
-            placeholder="搜索历史名称"
+            placeholder={showRemovedHistory ? "搜索删除名称" : "搜索历史名称"}
           />
-          <span>按时间</span>
+          <span>{showRemovedHistory ? "按删除时间" : "按添加时间"}</span>
           <select
             value={historyOrder}
             onChange={(event) =>
@@ -74,44 +58,70 @@ export function HistoryPanel({
         </div>
       </div>
       <div className="history-list">
-        {filteredHistory.length === 0 ? <p>暂无符合条件的历史记录</p> : null}
-        {filteredHistory.map((record, index) => (
-          <article
-            className="history-item"
-            key={`${record.animeId}-${record.addedAt}-${index}`}
-          >
-            <Image
-              src={record.cover}
-              alt={record.name}
-              width={52}
-              height={52}
-              className="history-cover"
-            />
-            <div>
-              <p className="title">{record.name}</p>
-              <p className="history-time">
-                {(record.action || "add") === "remove"
-                  ? "删除时间 "
-                  : "添加时间 "}
-                {new Date(record.addedAt).toLocaleString("zh-CN")}
-              </p>
-              <p className="history-time">
-                Rank:{" "}
-                {(() => {
-                  const currentTier = currentTierByAnimeId.get(record.animeId);
+        {displayRecords.length === 0 ? (
+          <p>
+            {showRemovedHistory
+              ? "暂无符合条件的删除记录"
+              : "暂无符合条件的历史记录"}
+          </p>
+        ) : null}
 
-                  if (currentTier) {
-                    return tierLabelMap.get(currentTier) || currentTier;
-                  }
-
-                  return (record.action || "add") === "remove"
-                    ? "已删除"
-                    : "未知";
-                })()}
-              </p>
-            </div>
-          </article>
-        ))}
+        {!showRemovedHistory
+          ? filteredHistory.map((record, index) => (
+              <article
+                className="history-item"
+                key={`${record.animeId}-${record.addedAt}-${index}`}
+              >
+                <Image
+                  src={record.cover}
+                  alt={record.name}
+                  width={52}
+                  height={52}
+                  className="history-cover"
+                />
+                <div>
+                  <p className="title">{record.name}</p>
+                  <p className="history-time">
+                    添加时间 {new Date(record.addedAt).toLocaleString("zh-CN")}
+                  </p>
+                  <p className="history-time">
+                    添加顺序 #{record.sequence || index + 1}
+                  </p>
+                </div>
+              </article>
+            ))
+          : filteredRemovedHistory.map((record, index) => (
+              <article
+                className="history-item"
+                key={`${record.animeId}-${record.removedAt}-${index}`}
+              >
+                <Image
+                  src={record.cover}
+                  alt={record.name}
+                  width={52}
+                  height={52}
+                  className="history-cover"
+                />
+                <div>
+                  <p className="title">{record.name}</p>
+                  <p className="history-time">
+                    删除时间{" "}
+                    {new Date(record.removedAt).toLocaleString("zh-CN")}
+                  </p>
+                  {record.addedAt ? (
+                    <p className="history-time">
+                      最后添加时间{" "}
+                      {new Date(record.addedAt).toLocaleString("zh-CN")}
+                    </p>
+                  ) : null}
+                  {record.sequence ? (
+                    <p className="history-time">
+                      对应添加顺序 #{record.sequence}
+                    </p>
+                  ) : null}
+                </div>
+              </article>
+            ))}
       </div>
     </section>
   );

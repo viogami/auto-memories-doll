@@ -22,5 +22,15 @@ export type HistoryRecord = {
   name: string;
   cover: string;
   addedAt: string;
+  sequence?: number;
   action?: HistoryAction;
+};
+
+export type RemovedHistoryRecord = {
+  animeId: number;
+  name: string;
+  cover: string;
+  removedAt: string;
+  addedAt?: string;
+  sequence?: number;
 };
