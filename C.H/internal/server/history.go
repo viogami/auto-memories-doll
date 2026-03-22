@@ -48,10 +48,12 @@ func (s *Server) uploadHistory(w http.ResponseWriter, r *http.Request, userID in
 	seen := make(map[int64]struct{}, len(req.Items))
 	for i := len(req.Items) - 1; i >= 0; i-- {
 		item := req.Items[i]
-		if item.AnimeID == 0 || strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.Cover) == "" {
-			writeError(w, http.StatusBadRequest, "anime_id, name, cover are required")
+		if item.AnimeID == 0 || strings.TrimSpace(item.Name) == "" {
+			writeError(w, http.StatusBadRequest, "anime_id and name are required")
 			return
 		}
+		item.Name = strings.TrimSpace(item.Name)
+		item.Cover = strings.TrimSpace(item.Cover)
 		if _, ok := seen[item.AnimeID]; ok {
 			continue
 		}
@@ -63,23 +65,50 @@ func (s *Server) uploadHistory(w http.ResponseWriter, r *http.Request, userID in
 		unique[i], unique[j] = unique[j], unique[i]
 	}
 
+	writtenCount := 0
 	for _, item := range unique {
-
 		clientAddedAt := parseRFC3339Nullable(item.AddedAt)
-		_, err := tx.Exec(r.Context(), `
-			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at, is_deleted, updated_at)
-			VALUES ($1, $2, $3, $4, $5, FALSE, NOW())
-			ON CONFLICT (user_id, anime_id) DO UPDATE
-			SET anime_name = EXCLUDED.anime_name,
-			    cover = EXCLUDED.cover,
-			    client_added_at = EXCLUDED.client_added_at,
+
+		updateTag, err := tx.Exec(r.Context(), `
+			UPDATE anime_history_records
+			SET anime_name = $3,
+			    cover = $4,
+			    client_added_at = $5,
 			    is_deleted = FALSE,
 			    updated_at = NOW()
+			WHERE user_id = $1
+			  AND anime_id = $2
+			  AND (
+			    is_deleted = TRUE
+			    OR anime_name IS DISTINCT FROM $3
+			    OR cover IS DISTINCT FROM $4
+			    OR client_added_at IS DISTINCT FROM $5
+			  )
+		`, userID, item.AnimeID, item.Name, item.Cover, clientAddedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "update history failed")
+			return
+		}
+		writtenCount += int(updateTag.RowsAffected())
+
+		if updateTag.RowsAffected() > 0 {
+			continue
+		}
+
+		insertTag, err := tx.Exec(r.Context(), `
+			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at, is_deleted, updated_at)
+			SELECT $1, $2, $3, $4, $5, FALSE, NOW()
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM anime_history_records
+				WHERE user_id = $1 AND anime_id = $2
+			)
 		`, userID, item.AnimeID, item.Name, item.Cover, clientAddedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "insert history failed")
 			return
 		}
+		writtenCount += int(insertTag.RowsAffected())
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
@@ -87,20 +116,30 @@ func (s *Server) uploadHistory(w http.ResponseWriter, r *http.Request, userID in
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]any{"uploaded": len(unique)})
+	writeJSON(w, http.StatusCreated, map[string]any{"uploaded": writtenCount})
 }
 
 func (s *Server) listHistory(w http.ResponseWriter, r *http.Request, userID int64) {
 	limit := parseLimit(r.URL.Query().Get("limit"), 50, 1, 200)
 
 	rows, err := s.pool.Query(r.Context(), `
-		SELECT id, anime_id, anime_name, cover,
-		       COALESCE(client_added_at::text, '') AS client_added_at,
-		       created_at::text
-		FROM anime_history_records
-		WHERE user_id = $1 AND is_deleted = FALSE
-		ORDER BY COALESCE(client_added_at, updated_at, created_at) DESC, updated_at DESC
-		LIMIT $2
+		WITH ranked AS (
+			SELECT id, anime_id, anime_name, cover,
+			       COALESCE(client_added_at::text, '') AS client_added_at,
+			       created_at::text AS created_at,
+			       updated_at::text AS updated_at,
+			       is_deleted,
+			       ROW_NUMBER() OVER (
+					PARTITION BY is_deleted
+					ORDER BY COALESCE(client_added_at, updated_at, created_at) DESC, updated_at DESC
+			   ) AS rn
+			FROM anime_history_records
+			WHERE user_id = $1
+		)
+		SELECT id, anime_id, anime_name, cover, client_added_at, created_at, updated_at, is_deleted
+		FROM ranked
+		WHERE rn <= $2
+		ORDER BY is_deleted ASC, rn ASC
 	`, userID, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "query history failed")
@@ -109,38 +148,33 @@ func (s *Server) listHistory(w http.ResponseWriter, r *http.Request, userID int6
 	defer rows.Close()
 
 	items := make([]historyQueryItem, 0, limit)
+	removedItems := make([]removedHistoryQueryItem, 0, limit)
 	for rows.Next() {
 		var item historyQueryItem
-		if err := rows.Scan(&item.ID, &item.AnimeID, &item.Name, &item.Cover, &item.AddedAt, &item.CreatedAt); err != nil {
+		var removed removedHistoryQueryItem
+		var updatedAt string
+		var isDeleted bool
+		if err := rows.Scan(&item.ID, &item.AnimeID, &item.Name, &item.Cover, &item.AddedAt, &item.CreatedAt, &updatedAt, &isDeleted); err != nil {
 			writeError(w, http.StatusInternalServerError, "scan history failed")
 			return
 		}
+
+		if isDeleted {
+			removed.AnimeID = item.AnimeID
+			removed.Name = item.Name
+			removed.Cover = item.Cover
+			removed.RemovedAt = updatedAt
+			removed.AddedAt = item.AddedAt
+			removedItems = append(removedItems, removed)
+			continue
+		}
+
 		items = append(items, item)
 	}
 
-	removedRows, err := s.pool.Query(r.Context(), `
-		SELECT anime_id, anime_name, cover,
-		       updated_at::text AS removed_at,
-		       COALESCE(client_added_at::text, '') AS added_at
-		FROM anime_history_records
-		WHERE user_id = $1 AND is_deleted = TRUE
-		ORDER BY updated_at DESC
-		LIMIT $2
-	`, userID, limit)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "query removed history failed")
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "iterate history failed")
 		return
-	}
-	defer removedRows.Close()
-
-	removedItems := make([]removedHistoryQueryItem, 0, limit)
-	for removedRows.Next() {
-		var item removedHistoryQueryItem
-		if err := removedRows.Scan(&item.AnimeID, &item.Name, &item.Cover, &item.RemovedAt, &item.AddedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, "scan removed history failed")
-			return
-		}
-		removedItems = append(removedItems, item)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

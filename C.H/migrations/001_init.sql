@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS anime_history_records (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE anime_history_records
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE anime_history_records
+ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+
 CREATE INDEX IF NOT EXISTS idx_history_user_id_created_at ON anime_history_records (user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS rank_snapshots (

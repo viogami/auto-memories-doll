@@ -12,14 +12,17 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, userID int64
 	}
 
 	var req struct {
-		History []historyUploadItem `json:"history"`
-		Rank    *rankUploadRequest  `json:"rank"`
+		History        []historyUploadItem `json:"history"`
+		RemovedHistory []struct {
+			AnimeID int64 `json:"anime_id"`
+		} `json:"removed_history"`
+		Rank *rankUploadRequest `json:"rank"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(req.History) == 0 && req.Rank == nil {
+	if len(req.History) == 0 && len(req.RemovedHistory) == 0 && req.Rank == nil {
 		writeError(w, http.StatusBadRequest, "history or rank is required")
 		return
 	}
@@ -31,15 +34,18 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, userID int64
 	}
 	defer tx.Rollback(r.Context())
 
-	historyCount := 0
+	historyAddedOrRestored := 0
+	historyRemoved := 0
 	unique := make([]historyUploadItem, 0, len(req.History))
 	seen := make(map[int64]struct{}, len(req.History))
 	for i := len(req.History) - 1; i >= 0; i-- {
 		item := req.History[i]
-		if item.AnimeID == 0 || strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.Cover) == "" {
+		if item.AnimeID == 0 || strings.TrimSpace(item.Name) == "" {
 			writeError(w, http.StatusBadRequest, "history item fields are required")
 			return
 		}
+		item.Name = strings.TrimSpace(item.Name)
+		item.Cover = strings.TrimSpace(item.Cover)
 		if _, ok := seen[item.AnimeID]; ok {
 			continue
 		}
@@ -51,51 +57,81 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, userID int64
 		unique[i], unique[j] = unique[j], unique[i]
 	}
 
-	activeIDs := make([]int64, 0, len(unique))
 	for _, item := range unique {
 		clientAddedAt := parseRFC3339Nullable(item.AddedAt)
-		_, err := tx.Exec(r.Context(), `
-			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at, is_deleted, updated_at)
-			VALUES ($1, $2, $3, $4, $5, FALSE, NOW())
-			ON CONFLICT (user_id, anime_id) DO UPDATE
-			SET anime_name = EXCLUDED.anime_name,
-			    cover = EXCLUDED.cover,
-			    client_added_at = EXCLUDED.client_added_at,
+
+		updateTag, err := tx.Exec(r.Context(), `
+			UPDATE anime_history_records
+			SET anime_name = $3,
+			    cover = $4,
+			    client_added_at = $5,
 			    is_deleted = FALSE,
 			    updated_at = NOW()
+			WHERE user_id = $1
+			  AND anime_id = $2
+			  AND (
+			    is_deleted = TRUE
+			    OR anime_name IS DISTINCT FROM $3
+			    OR cover IS DISTINCT FROM $4
+			    OR client_added_at IS DISTINCT FROM $5
+			  )
+		`, userID, item.AnimeID, item.Name, item.Cover, clientAddedAt)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "update history failed")
+			return
+		}
+		historyAddedOrRestored += int(updateTag.RowsAffected())
+
+		if updateTag.RowsAffected() > 0 {
+			continue
+		}
+
+		insertTag, err := tx.Exec(r.Context(), `
+			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at, is_deleted, updated_at)
+			SELECT $1, $2, $3, $4, $5, FALSE, NOW()
+			WHERE NOT EXISTS (
+				SELECT 1
+				FROM anime_history_records
+				WHERE user_id = $1 AND anime_id = $2
+			)
 		`, userID, item.AnimeID, item.Name, item.Cover, clientAddedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "insert history failed")
 			return
 		}
-		activeIDs = append(activeIDs, item.AnimeID)
-		historyCount++
+		historyAddedOrRestored += int(insertTag.RowsAffected())
 	}
 
-	if len(activeIDs) == 0 {
-		_, err := tx.Exec(r.Context(), `
-			UPDATE anime_history_records
-			SET is_deleted = TRUE,
-			    updated_at = NOW()
-			WHERE user_id = $1 AND is_deleted = FALSE
-		`, userID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "mark deleted failed")
-			return
+	removedIDs := make([]int64, 0, len(req.RemovedHistory))
+	removedSeen := make(map[int64]struct{}, len(req.RemovedHistory))
+	for _, item := range req.RemovedHistory {
+		if item.AnimeID == 0 {
+			continue
 		}
-	} else {
-		_, err := tx.Exec(r.Context(), `
+		if _, active := seen[item.AnimeID]; active {
+			continue
+		}
+		if _, ok := removedSeen[item.AnimeID]; ok {
+			continue
+		}
+		removedSeen[item.AnimeID] = struct{}{}
+		removedIDs = append(removedIDs, item.AnimeID)
+	}
+
+	if len(removedIDs) > 0 {
+		deleteTag, err := tx.Exec(r.Context(), `
 			UPDATE anime_history_records
 			SET is_deleted = TRUE,
 			    updated_at = NOW()
 			WHERE user_id = $1
 			  AND is_deleted = FALSE
-			  AND NOT (anime_id = ANY($2::BIGINT[]))
-		`, userID, activeIDs)
+			  AND anime_id = ANY($2::BIGINT[])
+		`, userID, removedIDs)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "mark deleted failed")
 			return
 		}
+		historyRemoved += int(deleteTag.RowsAffected())
 	}
 
 	var rankID *int64
@@ -126,7 +162,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, userID int64
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"history_uploaded": historyCount,
-		"rank_id":          rankID,
+		"history_uploaded":          historyAddedOrRestored,
+		"history_removed":           historyRemoved,
+		"history_changed_total":     historyAddedOrRestored + historyRemoved,
+		"rank_id":                   rankID,
 	})
 }

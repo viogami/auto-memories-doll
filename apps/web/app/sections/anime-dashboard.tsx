@@ -52,6 +52,7 @@ const USERNAME_KEY =
   process.env.NEXT_PUBLIC_CLOUD_USER_KEY?.trim() || "am_cloud_username";
 const REQUEST_TIMEOUT_MS = 7000;
 const HEALTH_CHECK_INTERVAL_MS = 20000;
+const RANK_COLLAPSE_LIMIT = 18;
 
 const fetcher = async (url: string): Promise<Anime[]> => {
   const response = await fetch(url);
@@ -72,6 +73,7 @@ export function AnimeDashboard() {
   const [keyword, setKeyword] = useState("");
   const [searchText, setSearchText] = useState("");
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
+  const [historyRankFilter, setHistoryRankFilter] = useState("all");
   const [showRemovedHistory, setShowRemovedHistory] = useState(false);
   const [historyNameFilter, setHistoryNameFilter] = useState("");
 
@@ -99,6 +101,12 @@ export function AnimeDashboard() {
 
   const [isExporting, setIsExporting] = useState(false);
   const [isExportingTier, setIsExportingTier] = useState(false);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [rankTierFilter, setRankTierFilter] = useState("all");
+  const [rankTierSort, setRankTierSort] = useState<"manual" | "asc" | "desc">(
+    "manual",
+  );
+  const [rankExpanded, setRankExpanded] = useState(false);
 
   const gridRef = useRef<HTMLDivElement | null>(null);
   const tierRef = useRef<HTMLDivElement | null>(null);
@@ -177,6 +185,87 @@ export function AnimeDashboard() {
     (item): item is AnimeItem => item !== null,
   );
 
+  const rankTierOrder = useMemo(() => {
+    const known = uiConfig.tierLevels.map((item) => item.tier);
+    const knownSet = new Set(known);
+    const unknown = Array.from(
+      new Set(
+        list.map((item) => item.tier).filter((tier) => !knownSet.has(tier)),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+
+    return [...known, ...unknown];
+  }, [list, uiConfig.tierLevels]);
+
+  const rankTierIndexMap = useMemo(
+    () => new Map(rankTierOrder.map((tier, index) => [tier, index])),
+    [rankTierOrder],
+  );
+
+  const listOrderMap = useMemo(
+    () => new Map(list.map((item, index) => [item.id, index])),
+    [list],
+  );
+
+  const listTierMap = useMemo(
+    () => new Map(list.map((item) => [item.id, item.tier])),
+    [list],
+  );
+
+  const historyRankOptions = useMemo(() => {
+    const tierSet = new Set<string>();
+    for (const record of history) {
+      tierSet.add(listTierMap.get(record.animeId) || "__unknown__");
+    }
+
+    return rankTierOrder
+      .filter((tier) => tierSet.has(tier))
+      .concat(tierSet.has("__unknown__") ? ["__unknown__"] : []);
+  }, [history, listTierMap, rankTierOrder]);
+
+  const rankFilterOptions = useMemo(
+    () =>
+      rankTierOrder.filter((tier) => list.some((item) => item.tier === tier)),
+    [list, rankTierOrder],
+  );
+
+  const rankPanelList = useMemo(() => {
+    let next =
+      rankTierFilter === "all"
+        ? [...list]
+        : list.filter((item) => item.tier === rankTierFilter);
+
+    if (rankTierSort === "manual") {
+      return next;
+    }
+
+    return [...next].sort((a, b) => {
+      const left = rankTierIndexMap.get(a.tier) ?? Number.MAX_SAFE_INTEGER;
+      const right = rankTierIndexMap.get(b.tier) ?? Number.MAX_SAFE_INTEGER;
+
+      if (left !== right) {
+        return rankTierSort === "asc" ? left - right : right - left;
+      }
+
+      const leftOrder = listOrderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = listOrderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+  }, [list, listOrderMap, rankTierFilter, rankTierIndexMap, rankTierSort]);
+
+  const rankHiddenCount = Math.max(
+    0,
+    rankPanelList.length - RANK_COLLAPSE_LIMIT,
+  );
+  const rankVisibleList =
+    !rankExpanded && rankHiddenCount > 0
+      ? rankPanelList.slice(0, RANK_COLLAPSE_LIMIT)
+      : rankPanelList;
+
+  useEffect(() => {
+    setRankExpanded(false);
+  }, [rankTierFilter, rankTierSort]);
+
   const sortedHistory = useMemo(() => {
     const next = [...history].sort(
       (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
@@ -202,9 +291,16 @@ export function AnimeDashboard() {
         return false;
       }
 
+      if (historyRankFilter !== "all") {
+        const currentTier = listTierMap.get(record.animeId) || "__unknown__";
+        if (currentTier !== historyRankFilter) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [historyNameFilter, sortedHistory]);
+  }, [historyNameFilter, historyRankFilter, listTierMap, sortedHistory]);
 
   const filteredRemovedHistory = useMemo(() => {
     const trimmedName = historyNameFilter.trim().toLowerCase();
@@ -245,8 +341,6 @@ export function AnimeDashboard() {
     { key: "rank", label: uiConfig.panelTitles.rank },
     { key: "tier", label: uiConfig.panelTitles.tier },
     { key: "grid", label: uiConfig.panelTitles.grid },
-    { key: "history", label: uiConfig.panelTitles.history },
-    { key: "editor", label: uiConfig.panelTitles.editor },
   ];
 
   const cloudSnapshot = useMemo(
@@ -258,6 +352,9 @@ export function AnimeDashboard() {
           cover: item.cover,
           added_at: item.addedAt,
         })),
+        removed_history: removedHistory.map((item) => ({
+          anime_id: item.animeId,
+        })),
         rank: {
           title: "前端自动同步快照",
           tier_board_name: uiConfig.tierBoardName,
@@ -268,7 +365,7 @@ export function AnimeDashboard() {
           },
         },
       }),
-    [history, list, uiConfig],
+    [history, list, removedHistory, uiConfig],
   );
 
   const switchToOffline = useCallback((message?: string) => {
@@ -682,6 +779,18 @@ export function AnimeDashboard() {
     const oldIndex = list.findIndex((item) => item.id === active.id);
     const newIndex = list.findIndex((item) => item.id === over.id);
 
+    const activeItem = list[oldIndex];
+    const overItem = list[newIndex];
+
+    if (!activeItem || !overItem) {
+      return;
+    }
+
+    if (activeItem.tier !== overItem.tier) {
+      setCloudMessage("Rank 面板仅支持同 rank 内拖拽排序");
+      return;
+    }
+
     if (oldIndex < 0 || newIndex < 0) {
       return;
     }
@@ -802,6 +911,14 @@ export function AnimeDashboard() {
             </button>
           ))}
         </div>
+        <div className="sidebar-actions">
+          <button
+            className="primary config-trigger"
+            onClick={() => setShowConfigModal(true)}
+          >
+            文本配置
+          </button>
+        </div>
       </aside>
 
       <main className="dashboard-main">
@@ -895,7 +1012,41 @@ export function AnimeDashboard() {
           <section className="panel rank-panel">
             <div className="panel-head">
               <h2>{uiConfig.panelTitles.rank}</h2>
-              <p>拖动条目调整顺序，右侧可改 Tier。</p>
+              <p>支持筛选/按 rank 排序，且仅同 rank 可拖拽。</p>
+            </div>
+            <div className="rank-toolbar">
+              <label className="rank-toolbar-field">
+                <span>筛选 Rank</span>
+                <select
+                  value={rankTierFilter}
+                  onChange={(event) => setRankTierFilter(event.target.value)}
+                >
+                  <option value="all">全部</option>
+                  {rankFilterOptions.map((tier) => (
+                    <option key={tier} value={tier}>
+                      {tier}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="rank-toolbar-field">
+                <span>排序</span>
+                <select
+                  value={rankTierSort}
+                  onChange={(event) =>
+                    setRankTierSort(
+                      event.target.value as "manual" | "asc" | "desc",
+                    )
+                  }
+                >
+                  <option value="manual">手动顺序</option>
+                  <option value="asc">按 Rank 升序</option>
+                  <option value="desc">按 Rank 降序</option>
+                </select>
+              </label>
+              <p className="rank-toolbar-meta">
+                显示 {rankVisibleList.length} / {rankPanelList.length}
+              </p>
             </div>
             <DndContext
               sensors={sensors}
@@ -903,11 +1054,11 @@ export function AnimeDashboard() {
               onDragEnd={onRankDragEnd}
             >
               <SortableContext
-                items={list.map((item) => item.id)}
+                items={rankVisibleList.map((item) => item.id)}
                 strategy={verticalListSortingStrategy}
               >
                 <div className="rank-list">
-                  {list.map((anime) => (
+                  {rankVisibleList.map((anime) => (
                     <SortableRankCard
                       key={anime.id}
                       anime={anime}
@@ -919,6 +1070,18 @@ export function AnimeDashboard() {
                 </div>
               </SortableContext>
             </DndContext>
+            {rankHiddenCount > 0 ? (
+              <div className="rank-expand-row">
+                <button
+                  className="ghost"
+                  onClick={() => setRankExpanded((state) => !state)}
+                >
+                  {rankExpanded
+                    ? "收起列表"
+                    : `展开全部（还有 ${rankHiddenCount} 项）`}
+                </button>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -1016,26 +1179,45 @@ export function AnimeDashboard() {
             </DndContext>
           </section>
         ) : null}
+      </main>
 
-        {isVisible("history") ? (
-          <HistoryPanel
-            panelTitle={uiConfig.panelTitles.history}
-            showRemovedHistory={showRemovedHistory}
-            historyNameFilter={historyNameFilter}
-            historyOrder={historyOrder}
-            filteredHistory={filteredHistory}
-            filteredRemovedHistory={filteredRemovedHistory}
-            onToggleShowRemovedHistory={() =>
-              setShowRemovedHistory((value) => !value)
-            }
-            onHistoryNameFilterChange={setHistoryNameFilter}
-            onHistoryOrderChange={setHistoryOrder}
-          />
-        ) : null}
+      <aside className="history-rail">
+        <HistoryPanel
+          panelTitle={uiConfig.panelTitles.history}
+          showRemovedHistory={showRemovedHistory}
+          historyNameFilter={historyNameFilter}
+          historyRankFilter={historyRankFilter}
+          historyRankOptions={historyRankOptions}
+          historyOrder={historyOrder}
+          filteredHistory={filteredHistory}
+          filteredRemovedHistory={filteredRemovedHistory}
+          onToggleShowRemovedHistory={() =>
+            setShowRemovedHistory((value) => !value)
+          }
+          onHistoryNameFilterChange={setHistoryNameFilter}
+          onHistoryRankFilterChange={setHistoryRankFilter}
+          onHistoryOrderChange={setHistoryOrder}
+        />
+      </aside>
 
-        {isVisible("editor") ? (
-          <section className="panel editor-panel">
-            <h2>{uiConfig.panelTitles.editor}</h2>
+      {showConfigModal ? (
+        <div
+          className="config-modal-backdrop"
+          onClick={() => setShowConfigModal(false)}
+        >
+          <section
+            className="panel editor-panel config-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="config-modal-head">
+              <h2>{uiConfig.panelTitles.editor}</h2>
+              <button
+                className="ghost"
+                onClick={() => setShowConfigModal(false)}
+              >
+                关闭
+              </button>
+            </div>
             <p className="sidebar-hint">修改后实时生效，可直接导出图。</p>
 
             <div className="editor-grid">
@@ -1117,8 +1299,8 @@ export function AnimeDashboard() {
               </div>
             </div>
           </section>
-        ) : null}
-      </main>
+        </div>
+      ) : null}
     </div>
   );
 }

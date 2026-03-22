@@ -26,21 +26,13 @@ const normalizeHistory = (history: HistoryRecord[]): HistoryRecord[] => {
     }
   }
 
-  const sortedByTime = [...byAnime.values()].sort(
-    (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
-  );
-
-  return sortedByTime.map((item, index) => ({
-    ...item,
-    sequence: item.sequence ?? index + 1,
-  }));
+  return [...byAnime.values()];
 };
 
 type AnimeStore = {
   list: AnimeItem[];
   history: HistoryRecord[];
   removedHistory: RemovedHistoryRecord[];
-  historySequence: number;
   selectedTag: string;
   setList: (list: AnimeItem[]) => void;
   setHistory: (history: HistoryRecord[]) => void;
@@ -58,25 +50,15 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
   list: [],
   history: [],
   removedHistory: [],
-  historySequence: 0,
   selectedTag: "all",
   setList: (list) =>
     set(() => ({
       list,
     })),
   setHistory: (history) =>
-    set((state) => {
-      const normalized = normalizeHistory(history);
-      const maxSequence = normalized.reduce(
-        (max, item) => Math.max(max, item.sequence || 0),
-        0,
-      );
-
-      return {
-        history: normalized,
-        historySequence: Math.max(state.historySequence, maxSequence),
-      };
-    }),
+    set(() => ({
+      history: normalizeHistory(history),
+    })),
   setRemovedHistory: (history) =>
     set(() => ({
       removedHistory: history,
@@ -95,13 +77,11 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
         tags: [],
         addedAt: new Date().toISOString(),
       };
-      const nextSequence = state.historySequence + 1;
       const historyRecord: HistoryRecord = {
         animeId: record.id,
         name: record.name,
         cover: record.cover,
         addedAt: record.addedAt,
-        sequence: nextSequence,
       };
 
       return {
@@ -110,7 +90,6 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
         removedHistory: state.removedHistory.filter(
           (item) => item.animeId !== anime.id,
         ),
-        historySequence: nextSequence,
       };
     }),
   removeAnime: (id) =>
@@ -135,7 +114,6 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
             cover: target.cover,
             removedAt: new Date().toISOString(),
             addedAt: lastAddedRecord?.addedAt,
-            sequence: lastAddedRecord?.sequence,
           },
         ],
       };

@@ -38,6 +38,7 @@ const MOBILE_TOKEN_KEY =
   process.env.EXPO_PUBLIC_MOBILE_TOKEN_KEY?.trim() || "am_mobile_cloud_token";
 const MOBILE_USER_KEY =
   process.env.EXPO_PUBLIC_MOBILE_USER_KEY?.trim() || "am_mobile_cloud_username";
+const RANK_COLLAPSE_LIMIT = 18;
 
 type PanelKey =
   | "cloud"
@@ -150,6 +151,7 @@ export default function App() {
   const [keyword, setKeyword] = useState("");
   const [isLoading, setLoading] = useState(false);
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
+  const [historyRankFilter, setHistoryRankFilter] = useState("all");
   const [results, setResults] = useState<Anime[]>([]);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -165,6 +167,11 @@ export default function App() {
     DASHBOARD_CONFIG.defaultPanels,
   );
   const [isExportingTier, setIsExportingTier] = useState(false);
+  const [rankTierFilter, setRankTierFilter] = useState("all");
+  const [rankTierSort, setRankTierSort] = useState<"manual" | "asc" | "desc">(
+    "manual",
+  );
+  const [rankExpanded, setRankExpanded] = useState(false);
 
   const applyingCloudDataRef = useRef(false);
   const skipNextAutoSyncRef = useRef(false);
@@ -173,8 +180,10 @@ export default function App() {
 
   const list = useAnimeStore((state) => state.list);
   const history = useAnimeStore((state) => state.history);
+  const removedHistory = useAnimeStore((state) => state.removedHistory);
   const setList = useAnimeStore((state) => state.setList);
   const setHistory = useAnimeStore((state) => state.setHistory);
+  const setRemovedHistory = useAnimeStore((state) => state.setRemovedHistory);
   const addAnime = useAnimeStore((state) => state.addAnime);
   const reorder = useAnimeStore((state) => state.reorder);
   const updateTier = useAnimeStore((state) => state.updateTier);
@@ -201,6 +210,9 @@ export default function App() {
             cover: item.cover,
             added_at: item.addedAt,
           })),
+        removed_history: removedHistory.map((item) => ({
+          anime_id: item.animeId,
+        })),
         rank: {
           title: "mobile 自动同步快照",
           tier_board_name: uiConfig.tierBoardName,
@@ -211,8 +223,89 @@ export default function App() {
           },
         },
       }),
-    [history, list, uiConfig],
+    [history, list, removedHistory, uiConfig],
   );
+
+  const rankTierOrder = useMemo(() => {
+    const known = uiConfig.tierLevels.map((item) => item.tier);
+    const knownSet = new Set(known);
+    const unknown = Array.from(
+      new Set(
+        list.map((item) => item.tier).filter((tier) => !knownSet.has(tier)),
+      ),
+    ).sort((a, b) => a.localeCompare(b));
+
+    return [...known, ...unknown];
+  }, [list, uiConfig.tierLevels]);
+
+  const rankTierIndexMap = useMemo(
+    () => new Map(rankTierOrder.map((tier, index) => [tier, index])),
+    [rankTierOrder],
+  );
+
+  const listOrderMap = useMemo(
+    () => new Map(list.map((item, index) => [item.id, index])),
+    [list],
+  );
+
+  const listTierMap = useMemo(
+    () => new Map(list.map((item) => [item.id, item.tier])),
+    [list],
+  );
+
+  const historyRankOptions = useMemo(() => {
+    const tierSet = new Set<string>();
+    for (const record of history) {
+      tierSet.add(listTierMap.get(record.animeId) || "__unknown__");
+    }
+
+    return rankTierOrder
+      .filter((tier) => tierSet.has(tier))
+      .concat(tierSet.has("__unknown__") ? ["__unknown__"] : []);
+  }, [history, listTierMap, rankTierOrder]);
+
+  const rankFilterOptions = useMemo(
+    () =>
+      rankTierOrder.filter((tier) => list.some((item) => item.tier === tier)),
+    [list, rankTierOrder],
+  );
+
+  const rankPanelList = useMemo(() => {
+    const filtered =
+      rankTierFilter === "all"
+        ? [...list]
+        : list.filter((item) => item.tier === rankTierFilter);
+
+    if (rankTierSort === "manual") {
+      return filtered;
+    }
+
+    return [...filtered].sort((a, b) => {
+      const left = rankTierIndexMap.get(a.tier) ?? Number.MAX_SAFE_INTEGER;
+      const right = rankTierIndexMap.get(b.tier) ?? Number.MAX_SAFE_INTEGER;
+
+      if (left !== right) {
+        return rankTierSort === "asc" ? left - right : right - left;
+      }
+
+      const leftOrder = listOrderMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = listOrderMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+      return leftOrder - rightOrder;
+    });
+  }, [list, listOrderMap, rankTierFilter, rankTierIndexMap, rankTierSort]);
+
+  const rankHiddenCount = Math.max(
+    0,
+    rankPanelList.length - RANK_COLLAPSE_LIMIT,
+  );
+  const rankVisibleList =
+    !rankExpanded && rankHiddenCount > 0
+      ? rankPanelList.slice(0, RANK_COLLAPSE_LIMIT)
+      : rankPanelList;
+
+  useEffect(() => {
+    setRankExpanded(false);
+  }, [rankTierFilter, rankTierSort]);
 
   const authedFetch = async (path: string, init?: RequestInit) => {
     if (!token) {
@@ -286,6 +379,13 @@ export default function App() {
             added_at?: string;
             created_at?: string;
           }>;
+          removed_items?: Array<{
+            anime_id: number;
+            name: string;
+            cover: string;
+            removed_at?: string;
+            added_at?: string;
+          }>;
         };
         const cloudHistory = (historyJson.items || []).map((item) => ({
           animeId: item.anime_id,
@@ -293,7 +393,18 @@ export default function App() {
           cover: item.cover,
           addedAt: item.added_at || item.created_at || new Date().toISOString(),
         }));
+        const cloudRemovedHistory = (historyJson.removed_items || []).map(
+          (item) => ({
+            animeId: item.anime_id,
+            name: item.name,
+            cover: item.cover,
+            removedAt:
+              item.removed_at || item.added_at || new Date().toISOString(),
+            addedAt: item.added_at,
+          }),
+        );
         setHistory(cloudHistory);
+        setRemovedHistory(cloudRemovedHistory);
       }
 
       const rankRes = await authedFetch("/api/v1/rank/latest");
@@ -535,6 +646,17 @@ export default function App() {
 
     return historyOrder === "asc" ? next : next.reverse();
   }, [history, historyOrder]);
+
+  const filteredHistory = useMemo(() => {
+    if (historyRankFilter === "all") {
+      return sortedHistory;
+    }
+
+    return sortedHistory.filter((record) => {
+      const currentTier = listTierMap.get(record.animeId) || "__unknown__";
+      return currentTier === historyRankFilter;
+    });
+  }, [historyRankFilter, listTierMap, sortedHistory]);
 
   const tierGroups = useMemo(() => {
     const knownRows = uiConfig.tierLevels.map((row) => ({
@@ -872,13 +994,157 @@ export default function App() {
         {isVisible("rank") ? (
           <View style={styles.panel}>
             <Text style={styles.h2}>{uiConfig.panelTitles.rank}</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.rankChipRow}
+            >
+              <Text style={styles.rankChipLabel}>筛选</Text>
+              <Pressable
+                onPress={() => setRankTierFilter("all")}
+                style={[
+                  styles.rankChip,
+                  rankTierFilter === "all" && styles.rankChipActive,
+                ]}
+              >
+                <Text
+                  style={
+                    rankTierFilter === "all"
+                      ? styles.rankChipTextActive
+                      : styles.rankChipText
+                  }
+                >
+                  全部
+                </Text>
+              </Pressable>
+              {rankFilterOptions.map((tier) => (
+                <Pressable
+                  key={`rank-filter-${tier}`}
+                  onPress={() => setRankTierFilter(tier)}
+                  style={[
+                    styles.rankChip,
+                    rankTierFilter === tier && styles.rankChipActive,
+                  ]}
+                >
+                  <Text
+                    style={
+                      rankTierFilter === tier
+                        ? styles.rankChipTextActive
+                        : styles.rankChipText
+                    }
+                  >
+                    {tier}
+                  </Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.rankSortRow}>
+              <Pressable
+                onPress={() => setRankTierSort("manual")}
+                style={[
+                  styles.rankSortBtn,
+                  rankTierSort === "manual" && styles.rankSortBtnActive,
+                ]}
+              >
+                <Text
+                  style={
+                    rankTierSort === "manual"
+                      ? styles.rankSortTextActive
+                      : styles.rankSortText
+                  }
+                >
+                  手动
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setRankTierSort("asc")}
+                style={[
+                  styles.rankSortBtn,
+                  rankTierSort === "asc" && styles.rankSortBtnActive,
+                ]}
+              >
+                <Text
+                  style={
+                    rankTierSort === "asc"
+                      ? styles.rankSortTextActive
+                      : styles.rankSortText
+                  }
+                >
+                  Rank 升序
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setRankTierSort("desc")}
+                style={[
+                  styles.rankSortBtn,
+                  rankTierSort === "desc" && styles.rankSortBtnActive,
+                ]}
+              >
+                <Text
+                  style={
+                    rankTierSort === "desc"
+                      ? styles.rankSortTextActive
+                      : styles.rankSortText
+                  }
+                >
+                  Rank 降序
+                </Text>
+              </Pressable>
+              <Text style={styles.rankMetaText}>
+                显示 {rankVisibleList.length}/{rankPanelList.length}
+              </Text>
+            </View>
+
             <DraggableFlatList
-              data={list}
+              data={rankVisibleList}
               keyExtractor={(item) => String(item.id)}
               renderItem={renderRankItem}
-              onDragEnd={({ data }) => reorder(data)}
+              onDragEnd={({ from, to }) => {
+                const activeItem = rankVisibleList[from];
+                const overItem = rankVisibleList[to];
+
+                if (!activeItem || !overItem) {
+                  return;
+                }
+
+                if (activeItem.tier !== overItem.tier) {
+                  setCloudMessage("Rank 面板仅支持同 rank 内拖拽排序");
+                  return;
+                }
+
+                const oldIndex = list.findIndex(
+                  (item) => item.id === activeItem.id,
+                );
+                const newIndex = list.findIndex(
+                  (item) => item.id === overItem.id,
+                );
+                if (oldIndex < 0 || newIndex < 0) {
+                  return;
+                }
+
+                const next = [...list];
+                const [moved] = next.splice(oldIndex, 1);
+                if (!moved) {
+                  return;
+                }
+                next.splice(newIndex, 0, moved);
+                reorder(next);
+              }}
               scrollEnabled={false}
             />
+            {rankHiddenCount > 0 ? (
+              <Pressable
+                onPress={() => setRankExpanded((state) => !state)}
+                style={styles.rankExpandBtn}
+              >
+                <Text style={styles.rankExpandText}>
+                  {rankExpanded
+                    ? "收起列表"
+                    : `展开全部（还有 ${rankHiddenCount} 项）`}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
 
@@ -962,6 +1228,48 @@ export default function App() {
           <View style={styles.panel}>
             <Text style={styles.h2}>{uiConfig.panelTitles.history}</Text>
             <View style={styles.tierRow}>
+              <Text style={styles.score}>Rank 筛选</Text>
+              <View style={styles.tierRow}>
+                <Pressable
+                  onPress={() => setHistoryRankFilter("all")}
+                  style={[
+                    styles.tier,
+                    historyRankFilter === "all" && styles.tierActive,
+                  ]}
+                >
+                  <Text
+                    style={
+                      historyRankFilter === "all"
+                        ? styles.tierTextActive
+                        : styles.tierText
+                    }
+                  >
+                    全部
+                  </Text>
+                </Pressable>
+                {historyRankOptions.map((tier) => (
+                  <Pressable
+                    key={`history-rank-${tier}`}
+                    onPress={() => setHistoryRankFilter(tier)}
+                    style={[
+                      styles.tier,
+                      historyRankFilter === tier && styles.tierActive,
+                    ]}
+                  >
+                    <Text
+                      style={
+                        historyRankFilter === tier
+                          ? styles.tierTextActive
+                          : styles.tierText
+                      }
+                    >
+                      {tier === "__unknown__" ? "未分配" : tier}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+            <View style={styles.tierRow}>
               <Text style={styles.score}>按时间排序</Text>
               <View style={styles.tierRow}>
                 <Pressable
@@ -1002,7 +1310,7 @@ export default function App() {
             </View>
 
             <View style={{ gap: 8 }}>
-              {sortedHistory.map((record, index) => (
+              {filteredHistory.map((record, index) => (
                 <View
                   style={styles.result}
                   key={`${record.animeId}-${record.addedAt}-${index}`}
@@ -1016,7 +1324,7 @@ export default function App() {
                   </View>
                 </View>
               ))}
-              {sortedHistory.length === 0 ? (
+              {filteredHistory.length === 0 ? (
                 <Text style={styles.score}>还没有添加记录</Text>
               ) : null}
             </View>
@@ -1272,6 +1580,86 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 8,
     marginBottom: 8,
+  },
+  rankChipRow: {
+    alignItems: "center",
+    gap: 8,
+    paddingRight: 10,
+    marginBottom: 4,
+  },
+  rankChipLabel: {
+    color: "#5f728f",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  rankChip: {
+    borderWidth: 1,
+    borderColor: "#d2dded",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: "#f3f7fd",
+  },
+  rankChipActive: {
+    backgroundColor: "#1a6fe8",
+    borderColor: "#1a6fe8",
+  },
+  rankChipText: {
+    color: "#3f5f86",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  rankChipTextActive: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  rankSortRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  rankSortBtn: {
+    borderWidth: 1,
+    borderColor: "#d7e1ef",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "#f5f8fe",
+  },
+  rankSortBtnActive: {
+    borderColor: "#1a6fe8",
+    backgroundColor: "#e8f1ff",
+  },
+  rankSortText: {
+    color: "#425c7e",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  rankSortTextActive: {
+    color: "#1a6fe8",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  rankMetaText: {
+    color: "#5f728f",
+    fontSize: 12,
+    marginLeft: "auto",
+  },
+  rankExpandBtn: {
+    marginTop: 4,
+    alignSelf: "center",
+    backgroundColor: "#eef3fb",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  rankExpandText: {
+    color: "#35557d",
+    fontWeight: "600",
+    fontSize: 12,
   },
   tierRow: {
     flexDirection: "row",

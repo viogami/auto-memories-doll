@@ -41,7 +41,7 @@ select {
   margin: 0 auto;
   padding: 24px 0 60px;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr) 360px;
   gap: 18px;
 }
 
@@ -65,6 +65,63 @@ select {
   margin-top: 12px;
   display: grid;
   gap: 8px;
+}
+
+.sidebar-actions {
+  margin-top: 14px;
+  display: grid;
+}
+
+.config-trigger {
+  width: 100%;
+  background: linear-gradient(135deg, #1f9d8d 0%, #117a76 100%);
+  border: 1px solid #0f6c67;
+  color: #f3fffd;
+  font-weight: 700;
+}
+
+.config-trigger:hover {
+  filter: brightness(1.03);
+}
+
+.history-rail {
+  align-self: start;
+  position: sticky;
+  top: 18px;
+}
+
+.history-rail .history-panel {
+  max-height: calc(100vh - 36px);
+  overflow: hidden;
+}
+
+.history-rail .history-list {
+  max-height: calc(100vh - 240px);
+}
+
+.config-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 20, 38, 0.42);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+
+.config-modal {
+  width: min(960px, 95vw);
+  max-height: 86vh;
+  overflow: auto;
+}
+
+.config-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .sidebar-btn {
@@ -359,6 +416,33 @@ select {
   gap: 10px;
 }
 
+.rank-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 240px)) 1fr;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+.rank-toolbar-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: #526884;
+}
+
+.rank-toolbar-meta {
+  justify-self: end;
+  color: #5a708d;
+  font-size: 0.88rem;
+}
+
+.rank-expand-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+}
+
 .rank-card {
   grid-template-columns: auto 1fr auto auto;
   cursor: grab;
@@ -489,10 +573,39 @@ select {
 }
 
 .history-actions {
-  display: flex;
-  align-items: center;
+  width: 100%;
+  display: grid;
   gap: 10px;
   color: #4b5f78;
+}
+
+.history-row {
+  display: grid;
+  gap: 10px;
+}
+
+.history-row-top {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+
+.history-row-bottom {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.history-control {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.history-control span {
+  font-size: 0.84rem;
+  color: #5c708b;
+}
+
+.history-control-search input {
+  width: 100%;
 }
 
 .history-list {
@@ -590,6 +703,23 @@ select {
     position: static;
   }
 
+  .history-rail {
+    position: static;
+  }
+
+  .history-rail .history-panel {
+    max-height: none;
+  }
+
+  .history-rail .history-list {
+    max-height: 360px;
+  }
+
+  .history-row-top,
+  .history-row-bottom {
+    grid-template-columns: 1fr;
+  }
+
   .sidebar-nav {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -625,6 +755,15 @@ select {
 
   .rank-card {
     grid-template-columns: auto 1fr;
+  }
+
+  .rank-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .rank-toolbar-meta {
+    justify-self: start;
   }
 
   .tier-select,
