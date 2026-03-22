@@ -32,21 +32,70 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, userID int64
 	defer tx.Rollback(r.Context())
 
 	historyCount := 0
-	for _, item := range req.History {
+	unique := make([]historyUploadItem, 0, len(req.History))
+	seen := make(map[int64]struct{}, len(req.History))
+	for i := len(req.History) - 1; i >= 0; i-- {
+		item := req.History[i]
 		if item.AnimeID == 0 || strings.TrimSpace(item.Name) == "" || strings.TrimSpace(item.Cover) == "" {
 			writeError(w, http.StatusBadRequest, "history item fields are required")
 			return
 		}
+		if _, ok := seen[item.AnimeID]; ok {
+			continue
+		}
+		seen[item.AnimeID] = struct{}{}
+		unique = append(unique, item)
+	}
+
+	for i, j := 0, len(unique)-1; i < j; i, j = i+1, j-1 {
+		unique[i], unique[j] = unique[j], unique[i]
+	}
+
+	activeIDs := make([]int64, 0, len(unique))
+	for _, item := range unique {
 		clientAddedAt := parseRFC3339Nullable(item.AddedAt)
 		_, err := tx.Exec(r.Context(), `
-			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO anime_history_records (user_id, anime_id, anime_name, cover, client_added_at, is_deleted, updated_at)
+			VALUES ($1, $2, $3, $4, $5, FALSE, NOW())
+			ON CONFLICT (user_id, anime_id) DO UPDATE
+			SET anime_name = EXCLUDED.anime_name,
+			    cover = EXCLUDED.cover,
+			    client_added_at = EXCLUDED.client_added_at,
+			    is_deleted = FALSE,
+			    updated_at = NOW()
 		`, userID, item.AnimeID, item.Name, item.Cover, clientAddedAt)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "insert history failed")
 			return
 		}
+		activeIDs = append(activeIDs, item.AnimeID)
 		historyCount++
+	}
+
+	if len(activeIDs) == 0 {
+		_, err := tx.Exec(r.Context(), `
+			UPDATE anime_history_records
+			SET is_deleted = TRUE,
+			    updated_at = NOW()
+			WHERE user_id = $1 AND is_deleted = FALSE
+		`, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "mark deleted failed")
+			return
+		}
+	} else {
+		_, err := tx.Exec(r.Context(), `
+			UPDATE anime_history_records
+			SET is_deleted = TRUE,
+			    updated_at = NOW()
+			WHERE user_id = $1
+			  AND is_deleted = FALSE
+			  AND NOT (anime_id = ANY($2::BIGINT[]))
+		`, userID, activeIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "mark deleted failed")
+			return
+		}
 	}
 
 	var rankID *int64

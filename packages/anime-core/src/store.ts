@@ -10,7 +10,23 @@ import type {
 } from "./types";
 
 const normalizeHistory = (history: HistoryRecord[]): HistoryRecord[] => {
-  const sortedByTime = [...history].sort(
+  const byAnime = new Map<number, HistoryRecord>();
+
+  for (const item of history) {
+    const existed = byAnime.get(item.animeId);
+    if (!existed) {
+      byAnime.set(item.animeId, item);
+      continue;
+    }
+
+    const existedTs = new Date(existed.addedAt).getTime();
+    const currentTs = new Date(item.addedAt).getTime();
+    if (Number.isNaN(existedTs) || currentTs >= existedTs) {
+      byAnime.set(item.animeId, item);
+    }
+  }
+
+  const sortedByTime = [...byAnime.values()].sort(
     (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
   );
 
@@ -91,6 +107,9 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
       return {
         list: [record, ...state.list],
         history: [...state.history, historyRecord],
+        removedHistory: state.removedHistory.filter(
+          (item) => item.animeId !== anime.id,
+        ),
         historySequence: nextSequence,
       };
     }),
@@ -107,6 +126,7 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
 
       return {
         list: state.list.filter((item) => item.id !== id),
+        history: state.history.filter((item) => item.animeId !== id),
         removedHistory: [
           ...state.removedHistory,
           {

@@ -371,6 +371,13 @@ export function AnimeDashboard() {
             added_at?: string;
             created_at?: string;
           }>;
+          removed_items?: Array<{
+            anime_id: number;
+            name: string;
+            cover: string;
+            removed_at?: string;
+            added_at?: string;
+          }>;
         };
         const cloudHistory = (historyJson.items || []).map((item) => ({
           animeId: item.anime_id,
@@ -378,8 +385,18 @@ export function AnimeDashboard() {
           cover: item.cover,
           addedAt: item.added_at || item.created_at || new Date().toISOString(),
         }));
+        const cloudRemovedHistory = (historyJson.removed_items || []).map(
+          (item) => ({
+            animeId: item.anime_id,
+            name: item.name,
+            cover: item.cover,
+            removedAt:
+              item.removed_at || item.added_at || new Date().toISOString(),
+            addedAt: item.added_at,
+          }),
+        );
         setHistory(cloudHistory);
-        setRemovedHistory([]);
+        setRemovedHistory(cloudRemovedHistory);
       }
 
       const rankRes = await authedFetch("/api/v1/rank/latest");
