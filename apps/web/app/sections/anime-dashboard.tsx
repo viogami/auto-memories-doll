@@ -14,9 +14,7 @@ import {
   arrayMove,
   rectSortingStrategy,
   verticalListSortingStrategy,
-  useSortable,
 } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import {
   compactGrid,
   toNineGrid,
@@ -33,8 +31,20 @@ import {
   DASHBOARD_CONFIG,
   type DashboardConfig,
   type PanelKey,
-  type TierLevelConfig,
 } from "../config/dashboard-config";
+import {
+  SortableGridCell,
+  SortableRankCard,
+  SortableTierLevelEditorRow,
+} from "./dashboard/sortable-cards";
+import {
+  createInitialConfig,
+  normalizeConfig,
+  parseCloudPayload,
+} from "./dashboard/dashboard-helpers";
+import { CloudPanel } from "./dashboard/cloud-panel";
+import { HistoryPanel } from "./dashboard/history-panel";
+import { StatsPanel } from "./dashboard/stats-panel";
 
 const TOKEN_KEY =
   process.env.NEXT_PUBLIC_CLOUD_TOKEN_KEY?.trim() || "am_cloud_token";
@@ -53,245 +63,6 @@ const fetcher = async (url: string): Promise<Anime[]> => {
   return response.json() as Promise<Anime[]>;
 };
 
-const createInitialConfig = (): DashboardConfig => ({
-  ...DASHBOARD_CONFIG,
-  panelTitles: { ...DASHBOARD_CONFIG.panelTitles },
-  tierLevels: DASHBOARD_CONFIG.tierLevels.map((item) => ({ ...item })),
-});
-
-function normalizeConfig(
-  input: unknown,
-  fallback: DashboardConfig,
-): DashboardConfig {
-  if (!input || typeof input !== "object") {
-    return fallback;
-  }
-
-  const source = input as Partial<DashboardConfig>;
-  const levels = Array.isArray(source.tierLevels)
-    ? source.tierLevels
-        .map((item) => {
-          if (!item || typeof item !== "object") {
-            return null;
-          }
-
-          const row = item as Partial<TierLevelConfig>;
-          const tier = typeof row.tier === "string" ? row.tier.trim() : "";
-          if (!tier) {
-            return null;
-          }
-
-          return {
-            tier,
-            label:
-              typeof row.label === "string" && row.label.trim()
-                ? row.label
-                : tier,
-            color:
-              typeof row.color === "string" && row.color.trim()
-                ? row.color
-                : "#9cc5ff",
-          };
-        })
-        .filter((item): item is TierLevelConfig => item !== null)
-    : fallback.tierLevels;
-
-  return {
-    ...fallback,
-    ...source,
-    panelTitles: {
-      ...fallback.panelTitles,
-      ...(source.panelTitles || {}),
-    },
-    defaultPanels:
-      Array.isArray(source.defaultPanels) && source.defaultPanels.length > 0
-        ? source.defaultPanels
-        : fallback.defaultPanels,
-    tierLevels: levels.length > 0 ? levels : fallback.tierLevels,
-  };
-}
-
-function parseCloudPayload(payload: unknown): {
-  list?: AnimeItem[];
-  uiConfig?: DashboardConfig;
-} {
-  let raw = payload;
-
-  if (typeof payload === "string") {
-    try {
-      raw = JSON.parse(payload);
-    } catch {
-      return {};
-    }
-  }
-
-  if (!raw || typeof raw !== "object") {
-    return {};
-  }
-
-  const obj = raw as {
-    list?: AnimeItem[];
-    uiConfig?: DashboardConfig;
-  };
-
-  return obj;
-}
-
-function SortableRankCard({
-  anime,
-  tierLevels,
-  onRemove,
-  onTierChange,
-}: {
-  anime: AnimeItem;
-  tierLevels: DashboardConfig["tierLevels"];
-  onRemove: (id: number) => void;
-  onTierChange: (id: number, value: AnimeItem["tier"]) => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: anime.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="rank-card"
-      {...attributes}
-      {...listeners}
-    >
-      <Image
-        src={anime.cover}
-        alt={anime.name}
-        width={72}
-        height={100}
-        className="cover"
-      />
-      <div className="rank-content">
-        <p className="title">{anime.name}</p>
-        <p className="score">Bangumi {anime.score.toFixed(1)}</p>
-      </div>
-      <select
-        className="tier-select"
-        value={anime.tier}
-        onChange={(event) =>
-          onTierChange(anime.id, event.target.value as AnimeItem["tier"])
-        }
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        {tierLevels.map((tier) => (
-          <option key={tier.tier} value={tier.tier}>
-            {tier.label}
-          </option>
-        ))}
-      </select>
-      <button
-        className="ghost danger"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={() => onRemove(anime.id)}
-      >
-        删除
-      </button>
-    </div>
-  );
-}
-
-function SortableGridCell({ anime }: { anime: AnimeItem }) {
-  const { attributes, listeners, setNodeRef, transform, transition } =
-    useSortable({ id: anime.id });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="grid-cell"
-      {...attributes}
-      {...listeners}
-    >
-      <Image
-        src={anime.cover}
-        alt={anime.name}
-        width={180}
-        height={240}
-        className="grid-cover"
-      />
-      <span>{anime.name}</span>
-    </div>
-  );
-}
-
-function SortableTierLevelEditorRow({
-  level,
-  onTierKeyBlur,
-  onLabelChange,
-  onColorChange,
-  onRemove,
-}: {
-  level: TierLevelConfig;
-  onTierKeyBlur: (fromTier: string, nextTier: string) => void;
-  onLabelChange: (tier: string, value: string) => void;
-  onColorChange: (tier: string, value: string) => void;
-  onRemove: (tier: string) => void;
-}) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: level.tier });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className={`editor-level-row ${isDragging ? "dragging" : ""}`}
-    >
-      <button
-        className="drag-handle"
-        aria-label={`拖拽排序 ${level.tier}`}
-        {...attributes}
-        {...listeners}
-      >
-        :::
-      </button>
-      <input
-        defaultValue={level.tier}
-        onBlur={(event) => onTierKeyBlur(level.tier, event.target.value)}
-        placeholder="tier key"
-      />
-      <input
-        value={level.label}
-        onChange={(event) => onLabelChange(level.tier, event.target.value)}
-        placeholder="显示名称"
-      />
-      <input
-        value={level.color}
-        onChange={(event) => onColorChange(level.tier, event.target.value)}
-        placeholder="#hex 颜色"
-      />
-      <button className="ghost danger" onClick={() => onRemove(level.tier)}>
-        删除
-      </button>
-    </div>
-  );
-}
-
 export function AnimeDashboard() {
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -301,6 +72,9 @@ export function AnimeDashboard() {
   const [keyword, setKeyword] = useState("");
   const [searchText, setSearchText] = useState("");
   const [historyOrder, setHistoryOrder] = useState<"desc" | "asc">("desc");
+  const [showRemovedHistory, setShowRemovedHistory] = useState(false);
+  const [historyTierFilter, setHistoryTierFilter] = useState("all");
+  const [historyNameFilter, setHistoryNameFilter] = useState("");
 
   const [uiConfig, setUiConfig] =
     useState<DashboardConfig>(createInitialConfig);
@@ -391,12 +165,11 @@ export function AnimeDashboard() {
     return base;
   }, [list, uiConfig.tierLevels]);
 
-  const statPrimaryLevels = uiConfig.tierLevels.slice(0, 3);
-  const statKnownCount = statPrimaryLevels.reduce(
-    (sum, level) => sum + (tierCountMap[level.tier] || 0),
-    0,
-  );
-  const statOtherCount = Math.max(0, list.length - statKnownCount);
+  const statUnknownCount = useMemo(() => {
+    const knownTiers = new Set(uiConfig.tierLevels.map((level) => level.tier));
+
+    return list.filter((item) => !knownTiers.has(item.tier)).length;
+  }, [list, uiConfig.tierLevels]);
 
   const gridCells = compactGrid(toNineGrid(list));
   const gridItems = gridCells.filter(
@@ -410,6 +183,57 @@ export function AnimeDashboard() {
 
     return historyOrder === "asc" ? next : next.reverse();
   }, [history, historyOrder]);
+
+  const currentTierByAnimeId = useMemo(() => {
+    return new Map(list.map((item) => [item.id, item.tier]));
+  }, [list]);
+
+  const historyTierOptions = useMemo(() => {
+    const fromConfig = uiConfig.tierLevels.map((item) => item.tier);
+    const fromList = list.map((item) => item.tier);
+
+    return Array.from(new Set([...fromConfig, ...fromList]));
+  }, [list, uiConfig.tierLevels]);
+
+  const filteredHistory = useMemo(() => {
+    const trimmedName = historyNameFilter.trim().toLowerCase();
+
+    return sortedHistory.filter((record) => {
+      const action = record.action || "add";
+      const currentTier = currentTierByAnimeId.get(record.animeId);
+      const isDeletedNow = !currentTier;
+
+      if (!showRemovedHistory && (action === "remove" || isDeletedNow)) {
+        return false;
+      }
+
+      if (historyTierFilter !== "all") {
+        if (currentTier !== historyTierFilter) {
+          return false;
+        }
+      }
+
+      if (trimmedName && !record.name.toLowerCase().includes(trimmedName)) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    currentTierByAnimeId,
+    historyNameFilter,
+    historyTierFilter,
+    showRemovedHistory,
+    sortedHistory,
+  ]);
+
+  const tierLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const level of uiConfig.tierLevels) {
+      map.set(level.tier, level.label);
+    }
+    return map;
+  }, [uiConfig.tierLevels]);
 
   const tierGroups = useMemo(() => {
     const knownRows = uiConfig.tierLevels.map((row) => ({
@@ -445,12 +269,14 @@ export function AnimeDashboard() {
   const cloudSnapshot = useMemo(
     () =>
       JSON.stringify({
-        history: history.map((item) => ({
-          anime_id: item.animeId,
-          name: item.name,
-          cover: item.cover,
-          added_at: item.addedAt,
-        })),
+        history: history
+          .filter((item) => (item.action || "add") !== "remove")
+          .map((item) => ({
+            anime_id: item.animeId,
+            name: item.name,
+            cover: item.cover,
+            added_at: item.addedAt,
+          })),
         rank: {
           title: "前端自动同步快照",
           tier_board_name: uiConfig.tierBoardName,
@@ -986,158 +812,38 @@ export function AnimeDashboard() {
         </header>
 
         {isVisible("cloud") ? (
-          <section className="panel cloud-panel">
-            <div className="panel-head">
-              <h2>{uiConfig.panelTitles.cloud}</h2>
-              <span
-                className={`cloud-state ${
-                  backendStatus === "checking"
-                    ? "checking"
-                    : backendStatus === "online"
-                      ? "online"
-                      : "offline"
-                }`}
-              >
-                {backendStatus === "checking"
-                  ? "连接检测中"
-                  : backendStatus === "online"
-                    ? token
-                      ? "后端在线 / 已登录"
-                      : "后端在线 / 未登录"
-                    : "后端离线"}
-              </span>
-            </div>
-
-            <div className="cloud-cards">
-              <div className="cloud-card auth-card">
-                <h3>账号</h3>
-                {token ? (
-                  <div className="cloud-summary">
-                    <p className="cloud-user">
-                      当前用户：{currentUser || authUsername}
-                    </p>
-                    <p className="cloud-user">登录成功后已隐藏登录输入框。</p>
-                    <div className="cloud-actions compact">
-                      <button
-                        className="ghost"
-                        onClick={() => void checkBackendStatus()}
-                        disabled={loadingCloud}
-                      >
-                        刷新连接状态
-                      </button>
-                      <button
-                        className="ghost danger"
-                        onClick={logout}
-                        disabled={!token}
-                      >
-                        退出
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="cloud-auth-grid">
-                      <input
-                        value={authUsername}
-                        onChange={(event) =>
-                          setAuthUsername(event.target.value)
-                        }
-                        placeholder="用户名"
-                      />
-                      <input
-                        value={authPassword}
-                        onChange={(event) =>
-                          setAuthPassword(event.target.value)
-                        }
-                        placeholder="密码"
-                        type="password"
-                      />
-                    </div>
-                    <div className="cloud-actions compact">
-                      <button
-                        className="primary"
-                        onClick={() => submitAuth("login")}
-                        disabled={loadingCloud || backendStatus === "offline"}
-                      >
-                        登录
-                      </button>
-                      <button
-                        className="ghost"
-                        onClick={() => submitAuth("register")}
-                        disabled={loadingCloud || backendStatus === "offline"}
-                      >
-                        注册
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              <div className="cloud-card sync-card">
-                <h3>同步控制</h3>
-                <label className="cloud-toggle">
-                  <input
-                    type="checkbox"
-                    checked={syncControlEnabled}
-                    onChange={(event) =>
-                      setSyncControlEnabled(event.target.checked)
-                    }
-                  />
-                  <span>启用手动同步操作（默认关闭）</span>
-                </label>
-                <p className="cloud-user">
-                  未勾选时，登录后会自动拉取云端；勾选后可手动选择同步方向
-                </p>
-
-                <div className="cloud-actions">
-                  <button
-                    className="ghost"
-                    onClick={confirmPullFromCloud}
-                    disabled={
-                      loadingCloud ||
-                      !token ||
-                      backendStatus !== "online" ||
-                      !syncControlEnabled
-                    }
-                  >
-                    拉取云端
-                  </button>
-                  <button
-                    className="primary"
-                    onClick={confirmPushToCloud}
-                    disabled={
-                      syncingCloud ||
-                      !token ||
-                      backendStatus !== "online" ||
-                      !syncControlEnabled
-                    }
-                  >
-                    {syncingCloud ? "上传中..." : "立即上传"}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <p className="cloud-message">{cloudMessage || "未连接云端"}</p>
-          </section>
+          <CloudPanel
+            panelTitle={uiConfig.panelTitles.cloud}
+            backendStatus={backendStatus}
+            token={token}
+            currentUser={currentUser}
+            authUsername={authUsername}
+            authPassword={authPassword}
+            loadingCloud={loadingCloud}
+            syncingCloud={syncingCloud}
+            syncControlEnabled={syncControlEnabled}
+            cloudMessage={cloudMessage}
+            onCheckBackendStatus={() => {
+              void checkBackendStatus();
+            }}
+            onLogout={logout}
+            onAuthUsernameChange={setAuthUsername}
+            onAuthPasswordChange={setAuthPassword}
+            onSubmitAuth={(mode) => {
+              void submitAuth(mode);
+            }}
+            onSyncControlEnabledChange={setSyncControlEnabled}
+            onConfirmPullFromCloud={confirmPullFromCloud}
+            onConfirmPushToCloud={confirmPushToCloud}
+          />
         ) : null}
 
-        <section className="panel stats">
-          <div>
-            <strong>{list.length}</strong>
-            <span>总收藏</span>
-          </div>
-          {statPrimaryLevels.map((level) => (
-            <div key={level.tier}>
-              <strong>{tierCountMap[level.tier] || 0}</strong>
-              <span>{level.label}</span>
-            </div>
-          ))}
-          <div>
-            <strong>{statOtherCount}</strong>
-            <span>其他层级</span>
-          </div>
-        </section>
+        <StatsPanel
+          listCount={list.length}
+          tierLevels={uiConfig.tierLevels}
+          tierCountMap={tierCountMap}
+          statUnknownCount={statUnknownCount}
+        />
 
         {isVisible("search") ? (
           <section className="panel search-panel">
@@ -1169,7 +875,15 @@ export function AnimeDashboard() {
                     <p className="title">{anime.name}</p>
                     <p className="score">Bangumi {anime.score.toFixed(1)}</p>
                   </div>
-                  <button className="primary" onClick={() => addAnime(anime)}>
+                  <button
+                    className="primary"
+                    onClick={() =>
+                      addAnime(
+                        anime,
+                        uiConfig.tierLevels.map((level) => level.tier),
+                      )
+                    }
+                  >
                     加入收藏
                   </button>
                 </article>
@@ -1305,47 +1019,23 @@ export function AnimeDashboard() {
         ) : null}
 
         {isVisible("history") ? (
-          <section className="panel history-panel">
-            <div className="panel-head">
-              <h2>{uiConfig.panelTitles.history}</h2>
-              <div className="history-actions">
-                <span>按时间</span>
-                <select
-                  value={historyOrder}
-                  onChange={(event) =>
-                    setHistoryOrder(event.target.value as "desc" | "asc")
-                  }
-                >
-                  <option value="desc">最新在前</option>
-                  <option value="asc">最早在前</option>
-                </select>
-              </div>
-            </div>
-            <div className="history-list">
-              {sortedHistory.length === 0 ? <p>还没有添加记录</p> : null}
-              {sortedHistory.map((record, index) => (
-                <article
-                  className="history-item"
-                  key={`${record.animeId}-${record.addedAt}-${index}`}
-                >
-                  <Image
-                    src={record.cover}
-                    alt={record.name}
-                    width={52}
-                    height={52}
-                    className="history-cover"
-                  />
-                  <div>
-                    <p className="title">{record.name}</p>
-                    <p className="history-time">
-                      添加时间{" "}
-                      {new Date(record.addedAt).toLocaleString("zh-CN")}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
+          <HistoryPanel
+            panelTitle={uiConfig.panelTitles.history}
+            showRemovedHistory={showRemovedHistory}
+            historyTierFilter={historyTierFilter}
+            historyTierOptions={historyTierOptions}
+            historyNameFilter={historyNameFilter}
+            historyOrder={historyOrder}
+            filteredHistory={filteredHistory}
+            currentTierByAnimeId={currentTierByAnimeId}
+            tierLabelMap={tierLabelMap}
+            onToggleShowRemovedHistory={() =>
+              setShowRemovedHistory((value) => !value)
+            }
+            onHistoryTierFilterChange={setHistoryTierFilter}
+            onHistoryNameFilterChange={setHistoryNameFilter}
+            onHistoryOrderChange={setHistoryOrder}
+          />
         ) : null}
 
         {isVisible("editor") ? (

@@ -5,24 +5,33 @@ function getTierRank(tier: Tier): number {
   return index === -1 ? TIER_ORDER.length + 1 : index;
 }
 
-export function computeTier(score: number): Tier {
-  if (score >= 8.8) {
-    return "S";
+export function computeTier(score: number, availableTiers?: Tier[]): Tier {
+  const tiers =
+    Array.isArray(availableTiers) && availableTiers.length > 0
+      ? Array.from(
+          new Set(
+            availableTiers
+              .map((item) => item.trim())
+              .filter((item): item is Tier => item.length > 0),
+          ),
+        )
+      : [...TIER_ORDER];
+
+  if (tiers.length === 0) {
+    return "Unrated";
   }
 
-  if (score >= 8) {
-    return "A";
+  const fallbackTier = tiers[tiers.length - 1] || "Unrated";
+  if (!Number.isFinite(score) || score < 5) {
+    return fallbackTier;
   }
 
-  if (score >= 7) {
-    return "B";
-  }
+  const clampedScore = Math.max(5, Math.min(10, score));
+  const sliceSize = 5 / tiers.length;
+  const offset = 10 - clampedScore;
+  const index = Math.min(tiers.length - 1, Math.floor(offset / sliceSize));
 
-  if (score > 0) {
-    return "C";
-  }
-
-  return "Unrated";
+  return tiers[index] || fallbackTier;
 }
 
 export function sortByTierAndScore(items: AnimeItem[]): AnimeItem[] {

@@ -193,12 +193,14 @@ export default function App() {
   const cloudSnapshot = useMemo(
     () =>
       JSON.stringify({
-        history: history.map((item) => ({
-          anime_id: item.animeId,
-          name: item.name,
-          cover: item.cover,
-          added_at: item.addedAt,
-        })),
+        history: history
+          .filter((item) => (item.action || "add") !== "remove")
+          .map((item) => ({
+            anime_id: item.animeId,
+            name: item.name,
+            cover: item.cover,
+            added_at: item.addedAt,
+          })),
         rank: {
           title: "mobile 自动同步快照",
           tier_board_name: uiConfig.tierBoardName,
@@ -523,7 +525,11 @@ export default function App() {
   const grid = compactGrid(toNineGrid(list));
 
   const sortedHistory = useMemo(() => {
-    const next = [...history].sort(
+    const visibleHistory = history.filter(
+      (item) => (item.action || "add") !== "remove",
+    );
+
+    const next = [...visibleHistory].sort(
       (a, b) => new Date(a.addedAt).getTime() - new Date(b.addedAt).getTime(),
     );
 
@@ -847,7 +853,12 @@ export default function App() {
                     <Text style={styles.score}>{item.score.toFixed(1)}</Text>
                   </View>
                   <Pressable
-                    onPress={() => addAnime(item)}
+                    onPress={() =>
+                      addAnime(
+                        item,
+                        uiConfig.tierLevels.map((level) => level.tier),
+                      )
+                    }
                     style={styles.addBtn}
                   >
                     <Text style={styles.addText}>加入</Text>

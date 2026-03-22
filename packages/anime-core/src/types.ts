@@ -14,3 +14,13 @@ export type AnimeItem = Anime & {
   tags: string[];
   addedAt: string;
 };
+
+export type HistoryAction = "add" | "remove";
+
+export type HistoryRecord = {
+  animeId: number;
+  name: string;
+  cover: string;
+  addedAt: string;
+  action?: HistoryAction;
+};

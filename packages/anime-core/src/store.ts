@@ -1,27 +1,15 @@
 import { create } from "zustand";
 
 import { computeTier } from "./rank";
-import type { Anime, AnimeItem, Tier } from "./types";
+import type { Anime, AnimeItem, HistoryRecord, Tier } from "./types";
 
 type AnimeStore = {
   list: AnimeItem[];
-  history: Array<{
-    animeId: number;
-    name: string;
-    cover: string;
-    addedAt: string;
-  }>;
+  history: HistoryRecord[];
   selectedTag: string;
   setList: (list: AnimeItem[]) => void;
-  setHistory: (
-    history: Array<{
-      animeId: number;
-      name: string;
-      cover: string;
-      addedAt: string;
-    }>,
-  ) => void;
-  addAnime: (anime: Anime) => void;
+  setHistory: (history: HistoryRecord[]) => void;
+  addAnime: (anime: Anime, availableTiers?: Tier[]) => void;
   removeAnime: (id: number) => void;
   reorder: (next: AnimeItem[]) => void;
   updateTier: (id: number, tier: Tier) => void;
@@ -42,7 +30,7 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
     set(() => ({
       history,
     })),
-  addAnime: (anime) =>
+  addAnime: (anime, availableTiers) =>
     set((state) => {
       const existed = state.list.some((item) => item.id === anime.id);
 
@@ -52,7 +40,7 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
 
       const record: AnimeItem = {
         ...anime,
-        tier: computeTier(anime.score),
+        tier: computeTier(anime.score, availableTiers),
         tags: [],
         addedAt: new Date().toISOString(),
       };
@@ -65,15 +53,33 @@ export const useAnimeStore = create<AnimeStore>((set) => ({
             name: record.name,
             cover: record.cover,
             addedAt: record.addedAt,
+            action: "add",
           },
           ...state.history,
         ],
       };
     }),
   removeAnime: (id) =>
-    set((state) => ({
-      list: state.list.filter((item) => item.id !== id),
-    })),
+    set((state) => {
+      const target = state.list.find((item) => item.id === id);
+      if (!target) {
+        return state;
+      }
+
+      return {
+        list: state.list.filter((item) => item.id !== id),
+        history: [
+          {
+            animeId: target.id,
+            name: target.name,
+            cover: target.cover,
+            addedAt: new Date().toISOString(),
+            action: "remove",
+          },
+          ...state.history,
+        ],
+      };
+    }),
   reorder: (next) =>
     set(() => ({
       list: next,
